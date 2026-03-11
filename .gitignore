@@ -48,3 +48,6 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# LithicDB data directories (created during tests and local runs)
+data/
