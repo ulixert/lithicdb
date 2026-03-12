@@ -138,3 +138,23 @@ func (s *SkipList) Len() int {
 func (s *SkipList) ApproximateSize() int64 {
 	return s.dataSize
 }
+
+// Scan returns an iterator over all entries in sorted key order.
+func (s *SkipList) Scan() *SkipListIterator {
+	return newSkipListIterator(s.head.next[0], nil)
+}
+
+// ScanRange returns an iterator over entries in [start, end).
+// If start is nil, the scan begins from the first key.
+// If end is nil, the scan continues through the last key.
+func (s *SkipList) ScanRange(start, end []byte) *SkipListIterator {
+	var startNode *skipListNode
+
+	if start == nil {
+		startNode = s.head.next[0]
+	} else {
+		startNode = s.findGreaterOrEqual(start, nil)
+	}
+
+	return newSkipListIterator(startNode, end)
+}

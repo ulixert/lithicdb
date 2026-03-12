@@ -10,7 +10,7 @@ import "bytes"
 // Memtable wrapper which handles synchronization.
 type SkipListIterator struct {
 	current *skipListNode
-	endKey  []byte
+	endKey  []byte // exclusive upper bound; nil means no bound
 }
 
 func newSkipListIterator(start *skipListNode, endKey []byte) *SkipListIterator {
@@ -23,10 +23,56 @@ func newSkipListIterator(start *skipListNode, endKey []byte) *SkipListIterator {
 	return it
 }
 
+// checkBound sets current to nil if we've reached or passed the end key.
 func (it *SkipListIterator) checkBound() {
 	if it.current != nil && it.endKey != nil {
 		if bytes.Compare(it.current.key, it.endKey) >= 0 {
 			it.current = nil
 		}
 	}
+}
+
+func (it *SkipListIterator) Key() []byte {
+	return it.current.key
+}
+
+// Value returns the value at the current position.
+// Returns nil for tombstone entries (deleted keys).
+func (it *SkipListIterator) Value() []byte {
+	if it.current.value.Tombstone {
+		return nil
+	}
+	return it.current.value.Data
+}
+
+func (it *SkipListIterator) Next() {
+	if it.current != nil {
+		it.current = it.current.next[0]
+		it.checkBound()
+	}
+}
+
+func (it *SkipListIterator) IsValid() bool {
+	return it.current != nil
+}
+
+// Err always returns nil for memtable iterators since all data
+// is in memory and no I/O errors can occur.
+func (it *SkipListIterator) Err() error {
+	return nil
+}
+
+func (it *SkipListIterator) Close() error {
+	it.current = nil
+	return nil
+}
+
+// IsTombstone return true if the current entry is a deletion maker.
+// This is not part of the base Iterator interface but is needed by
+// compaction and the read path to distinguish deletions from empty value.
+func (it *SkipListIterator) IsTombstone() bool {
+	if it.current == nil {
+		return false
+	}
+	return it.current.value.Tombstone
 }
