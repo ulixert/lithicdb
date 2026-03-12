@@ -14,6 +14,9 @@ import (
 // If the file ends with a partially written or corrupt record
 // (e.g., due to a crash), the corrupt tail is silently ignored
 // and all valid preceding records are returned.
+//
+// The entire file is read into memory. This is acceptable because
+// each WAL file corresponds to one memtable (typically <=64MB).
 func Recover(path string) ([]Entry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -48,7 +51,7 @@ func FindWALFiles(dir string) ([]uint64, error) {
 	dirEntries, err := os.ReadDir(dir)
 	if err != nil {
 		// If the directory does not exist, that means:
-		// no WAL directory or no WAL files, nothing to recover
+		// no WAL directory means there is nothing to recover.
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
@@ -79,30 +82,32 @@ func FindWALFiles(dir string) ([]uint64, error) {
 	return ids, nil
 }
 
+// RecoveredWAL holds the entries recovered from a single WAL file,
+// along with the memtable ID it belongs to.
+type RecoveredWAL struct {
+	ID      uint64
+	Entries []Entry
+}
+
 // RecoverDir finds all WAL files in dir and recovers entries from
-// each one, returning them grouped by memtable ID in ascending order.
+// each one, returning them in ascending memtable ID order.
 // This is the main entry point for crash recovery.
-func RecoverDir(dir string) (map[uint64][]Entry, error) {
+// Returns an empty slice if no WALS are found.
+func RecoverDir(dir string) ([]RecoveredWAL, error) {
 	ids, err := FindWALFiles(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
-	result := make(map[uint64][]Entry, len(ids))
-	for _, id := range ids {
+	result := make([]RecoveredWAL, len(ids))
+	for i, id := range ids {
 		path := filepath.Join(dir, walFileName(id))
 		entries, err := Recover(path)
 		if err != nil {
 			return nil, fmt.Errorf("wal: recover id %d: %w", id, err)
 		}
 
-		if len(entries) > 0 {
-			result[id] = entries
-		}
+		result[i] = RecoveredWAL{ID: id, Entries: entries}
 	}
 
 	return result, nil
