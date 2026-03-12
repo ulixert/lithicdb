@@ -3,6 +3,7 @@ package memtable
 import (
 	"sync"
 
+	"github.com/ulixert/lithicdb/iterator"
 	"github.com/ulixert/lithicdb/kv"
 )
 
@@ -56,6 +57,66 @@ func (m *Memtable) Get(key []byte) (kv.Value, bool) {
 	return m.sl.Get(key)
 }
 
+// Scan returns an iterator over all entries in sorted key order.
+//
+// The returned iterator holds a read lock on the memtable.
+// Caller MUST call Close() when done to release the lock.
+// While the iterator is open, writes to this memtable will block.
+func (m *Memtable) Scan() iterator.Iterator {
+	m.mu.RLock()
+	return &memtableIterator{
+		inner: m.sl.Scan(),
+		mu:    &m.mu,
+	}
+}
+
+// ScanRange returns an iterator over entries in [start, end).
+// If start is nil, the scan begins from the first key.
+// If end is nil, the scan continues through the last key.
+//
+// The returned iterator holds a read lock on the memtable.
+// Caller MUST call Close() when done to release the lock.
+func (m *Memtable) ScanRange(start, end []byte) iterator.Iterator {
+	m.mu.RLock()
+	return &memtableIterator{
+		inner: m.sl.ScanRange(start, end),
+		mu:    &m.mu,
+	}
+}
+
+// ApproximateSize returns the approximate memory usage in bytes.
+func (m *Memtable) ApproximateSize() int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sl.ApproximateSize()
+}
+
+// Len returns the number of entries in the memtable.
+func (m *Memtable) Len() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sl.Len()
+}
+
+// Freeze marks the memtable as immutable. After freezing,
+// no further writes should be made. Iteration over a frozen
+// memtable is safe without holding any locks.
+func (m *Memtable) Freeze() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.frozen = true
+}
+
+// IsFrozen returns whether the memtable has been frozen.
+func (m *Memtable) IsFrozen() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.frozen
+}
+
+// memtableIterator wraps a SkipListIterator and manages the
+// read lock lifecycle. The lock is acquired before iteration
+// begins and released when Close() is called.
 type memtableIterator struct {
 	inner *SkipListIterator
 	mu    *sync.RWMutex
@@ -90,4 +151,9 @@ func (it *memtableIterator) Close() error {
 	}
 
 	return err
+}
+
+// IsTombstone returns true if the current entry is a deletion marker.
+func (it *memtableIterator) IsTombstone() bool {
+	return it.inner.IsTombstone()
 }
