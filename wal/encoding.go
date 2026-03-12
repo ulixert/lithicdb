@@ -12,7 +12,7 @@ import (
 //
 //	[checksum: 4 bytes]  CRC32 of everything after checksum
 //	[length:   4 bytes]  byte length of (count + entries)
-//	[count:    2 bytes]  number of entries
+//	[count:    2 bytes]  number of entries in this record
 //	[entries...]
 //
 // Entry format:
@@ -21,7 +21,7 @@ import (
 //	[key_len:   2 bytes]  max key size: 64KB
 //	[value_len: 4 bytes]  max value size: 4GB (0 for tombstones)
 //	[key]
-//	[value]               omitted for tombstones
+//	[value]               omitted when flag = tombstone
 
 const (
 	checksumSize = 4
@@ -105,4 +105,77 @@ func encodeRecord(entries []Entry) []byte {
 	binary.LittleEndian.PutUint32(buf[:checksumSize], checksum)
 
 	return buf
+}
+
+// decodeRecord deserializes a WAL record from a byte slice that
+// includes the checksum and length header.
+// Returns the entries and the number of bytes consumed.
+func decodeRecord(data []byte) ([]Entry, int, error) {
+	if len(data) < headerSize {
+		return nil, 0, ErrShortRecord
+	}
+
+	// Read and verify checksum
+	storedChecksum := binary.LittleEndian.Uint32(data[:checksumSize])
+	payloadLen := binary.LittleEndian.Uint32(data[checksumSize:headerSize])
+
+	totalLen := headerSize + int(payloadLen)
+	if len(data) < totalLen {
+		return nil, 0, ErrShortRecord
+	}
+
+	actualChecksum := crc32.ChecksumIEEE(data[checksumSize:totalLen])
+	if storedChecksum != actualChecksum {
+		return nil, 0, ErrCorruptRecord
+	}
+
+	// Read entry count
+	offset := headerSize
+	count := int(binary.LittleEndian.Uint16(data[offset:]))
+	offset += countSize
+
+	// Decode entries
+	entries := make([]Entry, count)
+	for i := 0; i < count; i++ {
+		if offset+entryHeader > totalLen {
+			return nil, 0, ErrShortRecord
+		}
+
+		flag := data[offset]
+		offset += flagSize
+
+		keyLen := int(binary.LittleEndian.Uint16(data[offset:]))
+		offset += keyLenSize
+
+		valueLen := int(binary.LittleEndian.Uint32(data[offset:]))
+		offset += valueLenSize
+
+		if offset+keyLen > totalLen {
+			return nil, 0, ErrShortRecord
+		}
+
+		key := make([]byte, keyLen)
+		copy(key, data[offset:offset+keyLen])
+		offset += keyLen
+
+		var value kv.Value
+		switch flag {
+		case flagPut:
+			if offset+valueLen > totalLen {
+				return nil, 0, ErrShortRecord
+			}
+			valData := make([]byte, valueLen)
+			copy(valData, data[offset:offset+valueLen])
+			offset += valueLen
+			value = kv.NewValue(valData)
+		case flagTombstone:
+			value = kv.NewTombstone()
+		default:
+			return nil, 0, ErrInvalidFlag
+		}
+
+		entries[i] = Entry{Key: key, Value: value}
+	}
+
+	return entries, totalLen, nil
 }
