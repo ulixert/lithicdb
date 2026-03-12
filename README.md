@@ -42,14 +42,6 @@ Each LithicDB Engine:
 └────────────────────────────────────────────┘
 ```
 
-## Roadmap
-
-- [x] **Phase 1** — Storage foundation: iterator contract, skip list memtable, WAL, SSTable format with bloom filters, read/write path
-- [ ] **Phase 2** — Compaction and persistence: leveled compaction, manifest, block cache, write batches, benchmarking
-- [ ] **Phase 3** — MVCC and transactions: versioned keys, snapshot isolation, conflict detection, MVCC-aware compaction
-- [ ] **Phase 4** — Distributed layer: gRPC interface, consistent hashing, cluster membership, shard migration
-- [ ] **Phase 5** — Performance hardening: block compression, prefix encoding, key-value separation, parallel compaction, rate limiting
-
 ## Build
 
 ```bash
