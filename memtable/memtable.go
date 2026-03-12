@@ -34,7 +34,7 @@ func (m *Memtable) ID() uint64 {
 	return m.id
 }
 
-// Put inserts or update a key-value pair.
+// Put inserts or updates a key-value pair.
 func (m *Memtable) Put(key, value []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -60,7 +60,7 @@ func (m *Memtable) Get(key []byte) (kv.Value, bool) {
 // Scan returns an iterator over all entries in sorted key order.
 //
 // The returned iterator holds a read lock on the memtable.
-// Caller MUST call Close() when done to release the lock.
+// Callers MUST call Close() when done to release the lock.
 // While the iterator is open, writes to this memtable will block.
 func (m *Memtable) Scan() iterator.Iterator {
 	m.mu.RLock()
@@ -75,7 +75,7 @@ func (m *Memtable) Scan() iterator.Iterator {
 // If end is nil, the scan continues through the last key.
 //
 // The returned iterator holds a read lock on the memtable.
-// Caller MUST call Close() when done to release the lock.
+// Callers MUST call Close() when done to release the lock.
 func (m *Memtable) ScanRange(start, end []byte) iterator.Iterator {
 	m.mu.RLock()
 	return &memtableIterator{
@@ -112,48 +112,4 @@ func (m *Memtable) IsFrozen() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.frozen
-}
-
-// memtableIterator wraps a SkipListIterator and manages the
-// read lock lifecycle. The lock is acquired before iteration
-// begins and released when Close() is called.
-type memtableIterator struct {
-	inner *SkipListIterator
-	mu    *sync.RWMutex
-}
-
-func (it *memtableIterator) Key() []byte {
-	return it.inner.Key()
-}
-
-func (it *memtableIterator) Value() []byte {
-	return it.inner.Value()
-}
-
-func (it *memtableIterator) IsValid() bool {
-	return it.inner.IsValid()
-}
-
-func (it *memtableIterator) Next() {
-	it.inner.Next()
-}
-
-func (it *memtableIterator) Err() error {
-	return it.inner.Err()
-}
-
-func (it *memtableIterator) Close() error {
-	err := it.inner.Close()
-
-	if it.mu != nil {
-		it.mu.RUnlock()
-		it.mu = nil
-	}
-
-	return err
-}
-
-// IsTombstone returns true if the current entry is a deletion marker.
-func (it *memtableIterator) IsTombstone() bool {
-	return it.inner.IsTombstone()
 }
