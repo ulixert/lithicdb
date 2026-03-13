@@ -43,10 +43,9 @@ const (
 	magicValue = uint32(0x4C544442) // "LTDB"
 	version1   = byte(1)
 
-	indexKeyLenSize     = 2
-	indexOffsetSize     = 8
-	indexBlockSizeLen   = 4
-	indexEntryFixedSize = indexKeyLenSize + indexOffsetSize + indexBlockSizeLen
+	indexKeyLenSize    = 2
+	indexOffsetSize    = 8
+	indexBlockSizeSize = 4
 
 	blockFlagPut       byte = 0
 	blockFlagTombstone byte = 1
@@ -130,7 +129,7 @@ func encodeIndex(firstKey []byte, metas []blockMeta) []byte {
 	// Calculate size: first_key header + entries
 	size := indexKeyLenSize + len(firstKey)
 	for _, m := range metas {
-		size += indexEntryFixedSize + len(m.lastKey)
+		size += indexKeyLenSize + len(m.lastKey) + indexOffsetSize + indexBlockSizeSize
 	}
 
 	buf := make([]byte, 0, size)
@@ -143,22 +142,60 @@ func encodeIndex(firstKey []byte, metas []blockMeta) []byte {
 	for _, m := range metas {
 		buf = binary.LittleEndian.AppendUint16(buf, uint16(len(m.lastKey)))
 		buf = append(buf, m.lastKey...)
-		buf = appendUint64(buf, m.offset)
-		buf = appendUint32(buf, m.size)
+		buf = binary.LittleEndian.AppendUint64(buf, m.offset)
+		buf = binary.LittleEndian.AppendUint32(buf, m.size)
 	}
 
 	return buf
 }
 
-// Help functions to avoid the verbosity of binary.LittleEndian
-func appendUint64(buf []byte, v uint64) []byte {
-	var b [8]byte
-	binary.LittleEndian.PutUint64(b[:], v)
-	return append(buf, b[:]...)
-}
+func decodeIndex(data []byte) (firstKey []byte, metas []blockMeta, err error) {
+	if len(data) < indexKeyLenSize {
+		return nil, nil, fmt.Errorf("sstable: index block too short")
+	}
 
-func appendUint32(buf []byte, v uint32) []byte {
-	var b [4]byte
-	binary.LittleEndian.PutUint32(b[:], v)
-	return append(buf, b[:]...)
+	offset := 0
+
+	// First key
+	fkLen := int(binary.LittleEndian.Uint16(data[offset:]))
+	offset += indexKeyLenSize
+
+	if offset+fkLen > len(data) {
+		return nil, nil, fmt.Errorf("sstable: index first key truncated")
+	}
+	firstKey = make([]byte, fkLen)
+	copy(firstKey, data[offset:offset+fkLen])
+	offset += fkLen
+
+	// Block entries
+	for offset < len(data) {
+		if offset+indexKeyLenSize > len(data) {
+			return nil, nil, fmt.Errorf("sstable: index entry truncated")
+		}
+
+		lkLen := int(binary.LittleEndian.Uint16(data[offset:]))
+		offset += indexKeyLenSize
+
+		if offset+lkLen+indexOffsetSize+indexBlockSizeSize > len(data) {
+			return nil, nil, fmt.Errorf("sstable: index entry truncated")
+		}
+
+		lastKey := make([]byte, lkLen)
+		copy(lastKey, data[offset:offset+lkLen])
+		offset += lkLen
+
+		blockOffset := binary.LittleEndian.Uint64(data[offset:])
+		offset += indexOffsetSize
+
+		blockSize := binary.LittleEndian.Uint32(data[offset:])
+		offset += indexBlockSizeSize
+
+		metas = append(metas, blockMeta{
+			offset:  blockOffset,
+			size:    blockSize,
+			lastKey: lastKey,
+		})
+	}
+
+	return firstKey, metas, nil
 }
