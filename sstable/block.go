@@ -1,7 +1,9 @@
 package sstable
 
 import (
+	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/ulixert/lithicdb/kv"
 )
@@ -123,4 +125,130 @@ func (b *BlockBuilder) Build() []byte {
 func (b *BlockBuilder) Reset() {
 	b.data = b.data[:0]
 	b.offsets = b.offsets[:0]
+}
+
+// Block is a decoded data block. It holds the raw block bytes and
+// a parsed offset table for efficient random access.
+type Block struct {
+	data       []byte   // raw block bytes (the full encoded block)
+	offsets    []uint16 // entry offsets, parsed from the tail
+	numEntries int
+}
+
+// DecodeBlock parses a raw block (without checksum) into a Block.
+func DecodeBlock(data []byte) (*Block, error) {
+	if len(data) < blockCountSize {
+		return nil, fmt.Errorf("sstable: block too short (%d bytes)", len(data))
+	}
+
+	numEntries := int(binary.LittleEndian.Uint16(data[len(data)-blockCountSize:]))
+	if numEntries == 0 {
+		return nil, fmt.Errorf("sstable: block has zero entries")
+	}
+
+	offsetTableSize := numEntries*blockCountSize + blockCountSize
+	if len(data) < offsetTableSize {
+		return nil, fmt.Errorf("sstable: block too short for offset table")
+	}
+
+	offsetStart := len(data) - offsetTableSize
+	offsets := make([]uint16, numEntries)
+	for i := 0; i < numEntries; i++ {
+		offsets[i] = binary.LittleEndian.Uint16(data[offsetStart+i*blockOffsetSize:])
+	}
+
+	return &Block{
+		data:       data,
+		offsets:    offsets,
+		numEntries: numEntries,
+	}, nil
+}
+
+// readEntry decodes the entry at the given offsets table index.
+func (b *Block) readEntry(idx int) (key []byte, value kv.Value, err error) {
+	if idx < 0 || idx >= b.numEntries {
+		return nil, kv.Value{}, fmt.Errorf("sstable: block entry index %d out of range [0, %d)", idx, b.numEntries)
+	}
+
+	offset := int(b.offsets[idx])
+	if offset+blockEntryHeader > len(b.data) {
+		return nil, kv.Value{}, fmt.Errorf("sstable: block entry header truncated at index %d", idx)
+	}
+
+	keyLen := int(binary.LittleEndian.Uint16(b.data[offset:]))
+	offset += blockKeyLenSize
+
+	valueLen := int(binary.LittleEndian.Uint16(b.data[offset:]))
+	offset += blockValueLenSize
+
+	flag := b.data[offset]
+	offset += blockFlagSize
+
+	if offset+keyLen > len(b.data) {
+		return nil, kv.Value{}, fmt.Errorf("sstable: block entry key truncated at index %d", idx)
+	}
+
+	key = b.data[offset : offset+keyLen]
+	offset += keyLen
+
+	switch flag {
+	case blockFlagPut:
+		if offset+valueLen > len(b.data) {
+			return nil, kv.Value{}, fmt.Errorf("sstable: block entry value truncated at index: %d", idx)
+		}
+		value = kv.NewValue(b.data[offset : offset+valueLen])
+	case blockFlagTombstone:
+		value = kv.NewTombstone()
+	default:
+		return nil, kv.Value{}, fmt.Errorf("sstable: invalid block entry flag %d at index %d", flag, idx)
+	}
+
+	return key, value, nil
+}
+
+// Get searches for a key in the block using binary search.
+// Returns the value and true if found, or empty value and false if not.
+func (b *Block) Get(target []byte) (kv.Value, bool, error) {
+	low, high := 0, b.numEntries-1
+
+	for low <= high {
+		mid := low + (high-low)/2
+		key, _, err := b.readEntry(mid)
+		if err != nil {
+			return kv.Value{}, false, err
+		}
+
+		cmp := bytes.Compare(key, target)
+		switch {
+		case cmp < 0:
+			low = mid + 1
+		case cmp > 0:
+			high = mid - 1
+		default:
+			_, value, err := b.readEntry(mid)
+			if err != nil {
+				return kv.Value{}, false, err
+			}
+			return value, true, nil
+		}
+	}
+
+	return kv.Value{}, false, nil
+}
+
+// FirstKey returns the first (smallest) key in the block.
+func (b *Block) FirstKey() ([]byte, error) {
+	key, _, err := b.readEntry(0)
+	return key, err
+}
+
+// LastKey returns the last (largest) key in the block.
+func (b *Block) LastKey() ([]byte, error) {
+	key, _, err := b.readEntry(b.numEntries - 1)
+	return key, err
+}
+
+// NumEntries returns the number of entries in the block.
+func (b *Block) NumEntries() int {
+	return b.numEntries
 }
