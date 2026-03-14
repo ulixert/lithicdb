@@ -186,3 +186,24 @@ func (r *Reader) findBlock(key []byte) int {
 
 	return low
 }
+
+// Scan returns an iterator over all entries in the SSTable.
+func (r *Reader) Scan() *SSTableIterator {
+	return newSSTableIterator(r, 0, nil, nil)
+}
+
+// ScanRange returns an iterator over entries in [start, end).
+// If start is nil, the scan begins from the first key.
+// If end is nil, the scan continues through the last key.
+func (r *Reader) ScanRange(start, end []byte) *SSTableIterator {
+	startBlock := 0
+	if start != nil {
+		startBlock = r.findBlock(start)
+		if startBlock < 0 {
+			// start is past all keys - empty iterator
+			return newSSTableIterator(r, len(r.metas), nil, nil)
+		}
+	}
+
+	return newSSTableIterator(r, startBlock, start, end)
+}
