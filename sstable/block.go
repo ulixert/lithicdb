@@ -3,6 +3,7 @@ package sstable
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/ulixert/lithicdb/kv"
@@ -32,7 +33,14 @@ const (
 
 	maxKeyLen       = 1<<16 - 1 // 65,535, max value of uint16
 	maxValueLen     = 1<<16 - 1 // 65,535, stored as uint16 in block entries
-	maxBlockEntreis = 1<<16 - 1 // 65,535
+	maxBlockEntries = 1<<16 - 1 // 65,535
+)
+
+var (
+	ErrCorruptBlock    = errors.New("sstable: corrupt block")
+	ErrKeyTooLarge     = fmt.Errorf("sstable: key exceeds maximum size (%d bytes)", maxKeyLen)
+	ErrValueTooLarge   = fmt.Errorf("sstable: value exceed maximum size (%d bytes)", maxValueLen)
+	ErrBlockEntryLimit = fmt.Errorf("sstable: block exceeds maximum entries (%d)", maxBlockEntries)
 )
 
 // BlockBuilder accumulates sorted key-value entries and produces
@@ -48,13 +56,25 @@ func NewBlockBuilder(blockSize int) *BlockBuilder {
 	return &BlockBuilder{size: blockSize}
 }
 
-// Add appends a key-value entry. Returns false if adding the entry would
-// exceed the target block size, in which case the entry is
+// Add appends a key-value entry. Returns false if adding the entry
+// would exceed the target block size, in which case the entry is
 // NOT added and the caller should finish this block and start a new one.
 //
 // The first entry is always accepted regardless of size, ensuring
 // every block contains at least one entry.
-func (b *BlockBuilder) Add(key []byte, value kv.Value) bool {
+//
+// Return an error if the key or value exceeds the maximum size.
+func (b *BlockBuilder) Add(key []byte, value kv.Value) (bool, error) {
+	if len(key) > maxKeyLen {
+		return false, ErrKeyTooLarge
+	}
+	if !value.Tombstone && len(value.Data) > maxValueLen {
+		return false, ErrValueTooLarge
+	}
+	if len(b.offsets) >= maxBlockEntries {
+		return false, ErrBlockEntryLimit
+	}
+
 	entrySize := blockEntryHeader + len(key)
 	if !value.Tombstone {
 		entrySize += len(value.Data)
@@ -66,7 +86,7 @@ func (b *BlockBuilder) Add(key []byte, value kv.Value) bool {
 
 	// Always accept the first entry (a block must have at least one entry)
 	if len(b.offsets) > 0 && newTotal > b.size {
-		return false
+		return false, nil
 	}
 
 	b.offsets = append(b.offsets, uint16(len(b.data)))
@@ -96,7 +116,7 @@ func (b *BlockBuilder) Add(key []byte, value kv.Value) bool {
 		b.data = append(b.data, value.Data...)
 	}
 
-	return true
+	return true, nil
 }
 
 // IsEmpty returns true if no entries have been added.
