@@ -47,11 +47,10 @@ var (
 // BlockBuilder accumulates sorted key-value entries and produces
 // an encoded block. Entries must be added in sorted key order.
 type BlockBuilder struct {
-	data     []byte
-	offsets  []uint16
-	size     int // target block size
-	firstKey []byte
-	lastKey  []byte
+	data    []byte
+	offsets []uint16
+	size    int // target block size
+	lastKey []byte
 }
 
 // NewBlockBuilder creates a block builder with the given target size.
@@ -99,10 +98,7 @@ func (b *BlockBuilder) Add(key []byte, value kv.Value) (bool, error) {
 
 	b.offsets = append(b.offsets, uint16(len(b.data)))
 
-	// Track the first and last key, reusing backing arrays when possible
-	if len(b.firstKey) == 0 {
-		b.firstKey = append(b.firstKey[:0], key...)
-	}
+	// Track the last key, reusing a backing array when possible
 	b.lastKey = append(b.lastKey[:0], key...)
 
 	// key_len
@@ -163,18 +159,7 @@ func (b *BlockBuilder) Build() []byte {
 func (b *BlockBuilder) Reset() {
 	b.data = b.data[:0]
 	b.offsets = b.offsets[:0]
-	b.firstKey = b.firstKey[:0]
 	b.lastKey = b.lastKey[:0]
-}
-
-// FirstKey returns a copy of the first key added to this block, or nil if empty.
-func (b *BlockBuilder) FirstKey() []byte {
-	if b.firstKey == nil {
-		return nil
-	}
-	out := make([]byte, len(b.firstKey))
-	copy(out, b.firstKey)
-	return out
 }
 
 // LastKey returns a copy of the last key added to this block, or nil if empty.
