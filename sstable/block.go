@@ -34,13 +34,14 @@ const (
 	maxKeyLen       = 1<<16 - 1 // 65,535, max value of uint16
 	maxValueLen     = 1<<16 - 1 // 65,535, stored as uint16 in block entries
 	maxBlockEntries = 1<<16 - 1 // 65,535
+	maxBlockOffset  = 1<<16 - 1 // 65,535
 )
 
 var (
 	ErrCorruptBlock    = errors.New("sstable: corrupt block")
-	ErrKeyTooLarge     = fmt.Errorf("sstable: key exceeds maximum size (%d bytes)", maxKeyLen)
-	ErrValueTooLarge   = fmt.Errorf("sstable: value exceed maximum size (%d bytes)", maxValueLen)
-	ErrBlockEntryLimit = fmt.Errorf("sstable: block exceeds maximum entries (%d)", maxBlockEntries)
+	ErrKeyTooLarge     = errors.New("sstable: key exceeds maximum size")
+	ErrValueTooLarge   = errors.New("sstable: value exceeds maximum size")
+	ErrBlockEntryLimit = errors.New("sstable: block exceeds maximum entries")
 )
 
 // BlockBuilder accumulates sorted key-value entries and produces
@@ -56,23 +57,24 @@ func NewBlockBuilder(blockSize int) *BlockBuilder {
 	return &BlockBuilder{size: blockSize}
 }
 
-// Add appends a key-value entry. Returns false if adding the entry
-// would exceed the target block size, in which case the entry is
+// Add appends a key-value entry. Returns false with a nil error if adding
+// the entry would exceed the target block size, in which case the entry is
 // NOT added and the caller should finish this block and start a new one.
 //
-// The first entry is always accepted regardless of size, ensuring
-// every block contains at least one entry.
+// The first entry is always accepted regardless of size, ensuring every
+// block contains at least one entry.
 //
-// Return an error if the key or value exceeds the maximum size.
+// Returns a non-nil error if the key, value, entry count, or entry offset
+// exceeds the block format limits.
 func (b *BlockBuilder) Add(key []byte, value kv.Value) (bool, error) {
 	if len(key) > maxKeyLen {
-		return false, ErrKeyTooLarge
+		return false, fmt.Errorf("%w (%d bytes, max %d)", ErrKeyTooLarge, len(key), maxKeyLen)
 	}
 	if !value.Tombstone && len(value.Data) > maxValueLen {
-		return false, ErrValueTooLarge
+		return false, fmt.Errorf("%w (%d bytes, max %d)", ErrValueTooLarge, len(value.Data), maxValueLen)
 	}
 	if len(b.offsets) >= maxBlockEntries {
-		return false, ErrBlockEntryLimit
+		return false, fmt.Errorf("%w (%d)", ErrBlockEntryLimit, maxBlockEntries)
 	}
 
 	entrySize := blockEntryHeader + len(key)
@@ -87,6 +89,10 @@ func (b *BlockBuilder) Add(key []byte, value kv.Value) (bool, error) {
 	// Always accept the first entry (a block must have at least one entry)
 	if len(b.offsets) > 0 && newTotal > b.size {
 		return false, nil
+	}
+
+	if len(b.data) > maxBlockOffset {
+		return false, fmt.Errorf("%w: entry offset %d exceeds uint16 range", ErrCorruptBlock, len(b.data))
 	}
 
 	b.offsets = append(b.offsets, uint16(len(b.data)))
@@ -166,7 +172,7 @@ type Block struct {
 // be within the entry data region and strictly ascending.
 func DecodeBlock(data []byte) (*Block, error) {
 	if len(data) < blockCountSize {
-		return nil, fmt.Errorf("%w: too shrot (%d bytes)", ErrCorruptBlock, len(data))
+		return nil, fmt.Errorf("%w: too short (%d bytes)", ErrCorruptBlock, len(data))
 	}
 
 	numEntries := int(binary.LittleEndian.Uint16(data[len(data)-blockCountSize:]))

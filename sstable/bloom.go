@@ -117,7 +117,7 @@ func DecodeBloomFilter(data []byte) *BloomFilter {
 	}
 
 	k := int(data[len(data)-1])
-	if k == 0 {
+	if k < 1 || k > 30 {
 		return nil
 	}
 

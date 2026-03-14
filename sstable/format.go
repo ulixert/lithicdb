@@ -1,6 +1,7 @@
 package sstable
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -97,13 +98,13 @@ func decodeFooter(data []byte) (footer, error) {
 	d := data[len(data)-footerSize:]
 
 	if m := binary.LittleEndian.Uint32(d[29:]); m != magicValue {
-		return footer{}, fmt.Errorf("%w: footer", ErrInvalidChecksum)
+		return footer{}, ErrInvalidMagic
 	}
 
 	stored := binary.LittleEndian.Uint32(d[25:29])
 	actual := crc32.ChecksumIEEE(d[:25])
 	if stored != actual {
-		return footer{}, ErrInvalidChecksum
+		return footer{}, fmt.Errorf("%w: footer", ErrInvalidChecksum)
 	}
 
 	f := footer{
@@ -181,6 +182,9 @@ func decodeIndex(data []byte) (firstKey []byte, metas []blockMeta, err error) {
 	offset += fkLen
 
 	// Block entries
+	var prevLastKey []byte
+	var prevEndOffset uint64
+
 	for offset < len(data) {
 		if offset+indexKeyLenSize > len(data) {
 			return nil, nil, fmt.Errorf("%w: entry truncated at offset %d", ErrCorruptIndex, offset)
@@ -203,11 +207,33 @@ func decodeIndex(data []byte) (firstKey []byte, metas []blockMeta, err error) {
 		blockSize := binary.LittleEndian.Uint32(data[offset:])
 		offset += indexBlockSizeSize
 
+		// Validate: block size must be non-zero
+		if blockSize == 0 {
+			return nil, nil, fmt.Errorf("%w: block  %d has zero size", ErrCorruptIndex, len(metas))
+		}
+
+		// Validate: block offsets must be non-overlapping and increasing
+		if len(metas) > 0 {
+			if blockOffset < prevEndOffset {
+				return nil, nil, fmt.Errorf("%w: block %d offset %d overlaps previous block ending at %d",
+					ErrCorruptIndex, len(metas), blockOffset, prevEndOffset)
+			}
+		}
+
+		// Validate: last keys must be strictly increasing
+		if prevLastKey != nil && bytes.Compare(lastKey, prevLastKey) <= 0 {
+			return nil, nil, fmt.Errorf("%w: block %d last key %q not after previous %q",
+				ErrCorruptIndex, len(metas), lastKey, prevLastKey)
+		}
+
 		metas = append(metas, blockMeta{
 			offset:  blockOffset,
 			size:    blockSize,
 			lastKey: lastKey,
 		})
+
+		prevLastKey = lastKey
+		prevEndOffset = blockOffset + uint64(blockSize) + blockChecksumSize
 	}
 
 	return firstKey, metas, nil

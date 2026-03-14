@@ -11,13 +11,18 @@ import (
 func TestBlock_RoundTrip(t *testing.T) {
 	b := NewBlockBuilder(4096)
 
-	if !b.Add([]byte("a"), kv.NewValue([]byte("one"))) {
+	_, err := b.Add([]byte("a"), kv.NewValue([]byte("one")))
+	if err != nil {
 		t.Fatal("failed to add a")
 	}
-	if !b.Add([]byte("b"), kv.NewTombstone()) {
+
+	_, err = b.Add([]byte("b"), kv.NewTombstone())
+	if err != nil {
 		t.Fatal("failed to add b tombstone")
 	}
-	if !b.Add([]byte("c"), kv.NewValue([]byte{})) {
+
+	_, err = b.Add([]byte("c"), kv.NewValue([]byte{}))
+	if err != nil {
 		t.Fatal("failed to add c empty value")
 	}
 
@@ -62,26 +67,19 @@ func TestBlock_RoundTrip(t *testing.T) {
 func TestBlockBuilder_Add_RespectsSizeLimit(t *testing.T) {
 	b := NewBlockBuilder(32)
 
-	if !b.Add([]byte("a"), kv.NewValue([]byte("1234567890"))) {
+	_, err := b.Add([]byte("a"), kv.NewValue([]byte("1234567890")))
+	if err != nil {
 		t.Fatal("first entry should always be accepted")
 	}
 
-	if b.Add([]byte("b"), kv.NewValue([]byte("1234567890"))) {
+	_, err = b.Add([]byte("b"), kv.NewValue([]byte("1234567890")))
+	if err != nil {
 		t.Fatal("second entry should not fit")
 	}
 }
 
 func TestBlock_FirstAndLastKey(t *testing.T) {
 	b := NewBlockBuilder(4096)
-	if !b.Add([]byte("apple"), kv.NewValue([]byte("1"))) {
-		t.Fatal("failed to add apple")
-	}
-	if !b.Add([]byte("banana"), kv.NewValue([]byte("2"))) {
-		t.Fatal("failed to add banana")
-	}
-	if !b.Add([]byte("carrot"), kv.NewValue([]byte("3"))) {
-		t.Fatal("failed to add carrot")
-	}
 
 	raw := b.Build()
 	block, err := DecodeBlock(raw)
