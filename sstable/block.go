@@ -34,7 +34,7 @@ const (
 	maxKeyLen       = 1<<16 - 1 // 65,535, max value of uint16
 	maxValueLen     = 1<<16 - 1 // 65,535, stored as uint16 in block entries
 	maxBlockEntries = 1<<16 - 1 // 65,535
-	maxBlockOffset  = 1<<16 - 1 // 65,535
+	maxBlockOffset  = 1<<16 - 1 // 65,535, offsets stored as uint16
 )
 
 var (
@@ -99,13 +99,11 @@ func (b *BlockBuilder) Add(key []byte, value kv.Value) (bool, error) {
 
 	b.offsets = append(b.offsets, uint16(len(b.data)))
 
-	// Track the first and last key
-	keyCopy := make([]byte, len(key))
-	copy(keyCopy, key)
-	if b.firstKey == nil {
-		b.firstKey = keyCopy
+	// Track the first and last key, reusing backing arrays when possible
+	if len(b.firstKey) == 0 {
+		b.firstKey = append(b.firstKey[:0], key...)
 	}
-	b.lastKey = keyCopy
+	b.lastKey = append(b.lastKey[:0], key...)
 
 	// key_len
 	b.data = binary.LittleEndian.AppendUint16(b.data, uint16(len(key)))
@@ -161,22 +159,32 @@ func (b *BlockBuilder) Build() []byte {
 	return buf
 }
 
-// Reset clears the builder for reuse.
+// Reset clears the builder for reuse, preserving allocated capacity.
 func (b *BlockBuilder) Reset() {
 	b.data = b.data[:0]
 	b.offsets = b.offsets[:0]
-	b.firstKey = nil
-	b.lastKey = nil
+	b.firstKey = b.firstKey[:0]
+	b.lastKey = b.lastKey[:0]
 }
 
-// FirstKey returns the first key added to this block, or nil if empty.
+// FirstKey returns a copy of the first key added to this block, or nil if empty.
 func (b *BlockBuilder) FirstKey() []byte {
-	return b.firstKey
+	if b.firstKey == nil {
+		return nil
+	}
+	out := make([]byte, len(b.firstKey))
+	copy(out, b.firstKey)
+	return out
 }
 
-// LastKey returns the last key added to this block, or nil if empty.
+// LastKey returns a copy of the last key added to this block, or nil if empty.
 func (b *BlockBuilder) LastKey() []byte {
-	return b.lastKey
+	if b.lastKey == nil {
+		return nil
+	}
+	out := make([]byte, len(b.lastKey))
+	copy(out, b.lastKey)
+	return out
 }
 
 // Block is a decoded data block. It holds the raw block bytes and

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -63,11 +64,12 @@ func NewBuilder(dir string, id uint64, blockSize int) *Builder {
 func (b *Builder) Add(key []byte, value kv.Value) error {
 	// Track the first key of the entire SSTable
 	if b.firstKey == nil {
-		b.firstKey = make([]byte, len(key))
-		copy(b.firstKey, key)
+		b.firstKey = append(b.firstKey[:0], key...)
 	}
 
-	// Collect key for bloom filter (make a copy since key may be reused)
+	// Copy key for bloom filter.
+	// keyCopy persists in b.keys, so b.lastKey can reference it
+	// safely - it stays valid until Finish.
 	keyCopy := make([]byte, len(key))
 	copy(keyCopy, key)
 	b.keys = append(b.keys, keyCopy)
@@ -101,14 +103,16 @@ func (b *Builder) flushBlock() error {
 
 	blockData := b.block.Build()
 
-	// Record metadata before writing
-	lastKey := make([]byte, len(b.block.LastKey()))
-	copy(lastKey, b.block.LastKey())
+	// Validate block size fits in uint32
+	if len(blockData) > math.MaxUint32 {
+		return fmt.Errorf("sstable: block size %d exceeds uint32 max", len(blockData))
+	}
 
+	// Record metadata before writing
 	b.metas = append(b.metas, blockMeta{
 		offset:  b.offset,
 		size:    uint32(len(blockData)),
-		lastKey: lastKey,
+		lastKey: b.block.LastKey(), // returns a copy
 	})
 
 	// Append block data
