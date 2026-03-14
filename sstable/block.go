@@ -47,9 +47,11 @@ var (
 // BlockBuilder accumulates sorted key-value entries and produces
 // an encoded block. Entries must be added in sorted key order.
 type BlockBuilder struct {
-	data    []byte
-	offsets []uint16
-	size    int // target block size
+	data     []byte
+	offsets  []uint16
+	size     int // target block size
+	firstKey []byte
+	lastKey  []byte
 }
 
 // NewBlockBuilder creates a block builder with the given target size.
@@ -96,6 +98,14 @@ func (b *BlockBuilder) Add(key []byte, value kv.Value) (bool, error) {
 	}
 
 	b.offsets = append(b.offsets, uint16(len(b.data)))
+
+	// Track the first and last key
+	keyCopy := make([]byte, len(key))
+	copy(keyCopy, key)
+	if b.firstKey == nil {
+		b.firstKey = keyCopy
+	}
+	b.lastKey = keyCopy
 
 	// key_len
 	b.data = binary.LittleEndian.AppendUint16(b.data, uint16(len(key)))
@@ -155,6 +165,18 @@ func (b *BlockBuilder) Build() []byte {
 func (b *BlockBuilder) Reset() {
 	b.data = b.data[:0]
 	b.offsets = b.offsets[:0]
+	b.firstKey = nil
+	b.lastKey = nil
+}
+
+// FirstKey returns the first key added to this block, or nil if empty.
+func (b *BlockBuilder) FirstKey() []byte {
+	return b.firstKey
+}
+
+// LastKey returns the last key added to this block, or nil if empty.
+func (b *BlockBuilder) LastKey() []byte {
+	return b.lastKey
 }
 
 // Block is a decoded data block. It holds the raw block bytes and
@@ -180,7 +202,7 @@ func DecodeBlock(data []byte) (*Block, error) {
 		return nil, fmt.Errorf("%w: zero entries", ErrCorruptBlock)
 	}
 
-	offsetTableSize := numEntries*blockCountSize + blockCountSize
+	offsetTableSize := numEntries*blockOffsetSize + blockCountSize
 	if len(data) < offsetTableSize {
 		return nil, fmt.Errorf("%w: too short for offset table", ErrCorruptBlock)
 	}
@@ -222,7 +244,7 @@ func (b *Block) readEntry(idx int) (key []byte, value kv.Value, err error) {
 	}
 
 	offset := int(b.offsets[idx])
-	if offset+blockEntryHeader > len(b.data) {
+	if offset+blockEntryHeader > b.entryRegionEnd {
 		return nil, kv.Value{}, fmt.Errorf("%w: entry header truncated at index %d", ErrCorruptBlock, idx)
 	}
 
