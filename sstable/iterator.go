@@ -112,13 +112,15 @@ func (it *SSTableIterator) seekToStart() {
 }
 
 // checkEnd marks the iterator as exhausted if the current key
-// is at or past the end bound.
+// is at or past the end bound and releases references to block data.
 func (it *SSTableIterator) checkEnd() {
 	if it.block == nil || it.endKey == nil {
 		return
 	}
 	if bytes.Compare(it.curKey, it.endKey) >= 0 {
 		it.block = nil
+		it.curKey = nil
+		it.curValue = kv.Value{}
 	}
 }
 
