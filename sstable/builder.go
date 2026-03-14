@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"os"
 	"path/filepath"
 
 	"github.com/ulixert/lithicdb/kv"
@@ -122,4 +123,69 @@ func (b *Builder) flushBlock() error {
 	b.block.Reset()
 
 	return nil
+}
+
+// Finish flushes the remaining block, writes the bloom filter,
+// index block, and footer, and writes the complete SSTable to disk.
+func (b *Builder) Finish() error {
+	if b.firstKey == nil {
+		return ErrEmptySSTable
+	}
+
+	// Flush the last block
+	if err := b.flushBlock(); err != nil {
+		return err
+	}
+
+	// Build and write bloom filter
+	bloom := BuildBloomFilter(b.keys)
+	bloomOffset := b.offset
+	if bloom != nil {
+		b.buf = append(b.buf, bloom...)
+		b.offset += uint64(len(bloom))
+	}
+
+	// Build and write index block
+	indexData, err := encodeIndex(b.firstKey, b.metas)
+	if err != nil {
+		return err
+	}
+	indexOffset := b.offset
+	b.buf = append(b.buf, indexData...)
+	b.offset += uint64(len(indexData))
+
+	// Write footer
+	f := footer{
+		bloomOffset: bloomOffset,
+		bloomLen:    uint32(len(bloom)),
+		indexOffset: indexOffset,
+		indexLen:    uint32(len(indexData)),
+		version:     version1,
+	}
+	b.buf = append(b.buf, encodeFooter(f)...)
+
+	// Write file atomically: write to temp, then rename
+	if err := os.MkdirAll(b.dir, 0o750); err != nil {
+		return fmt.Errorf("sstable: create directory: %w", err)
+	}
+
+	finalPath := SSTPath(b.dir, b.id)
+	tmpPath := finalPath + ".tmp"
+
+	if err := os.WriteFile(tmpPath, b.buf, 0o640); err != nil {
+		return fmt.Errorf("sstable: write temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("sstable: rename: %w", err)
+	}
+
+	return nil
+}
+
+// EstimatedSize returns the approximate size of the SSTable built so far.
+// Useful for deciding when to stop adding entries.
+func (b *Builder) EstimatedSize() uint64 {
+	return b.offset + uint64(len(b.block.data))
 }
