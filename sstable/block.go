@@ -152,51 +152,72 @@ func (b *BlockBuilder) Reset() {
 }
 
 // Block is a decoded data block. It holds the raw block bytes and
-// a parsed offset table for efficient random access.
+// a parsed offset table for efficient random access within the
+// entry data region.
 type Block struct {
-	data       []byte   // raw block bytes (the full encoded block)
-	offsets    []uint16 // entry offsets, parsed from the tail
-	numEntries int
+	data           []byte   // raw block bytes (the full encoded block)
+	offsets        []uint16 // entry offsets, parsed from the tail
+	numEntries     int
+	entryRegionEnd int // byte offset where entry data ends and offset table begins
 }
 
 // DecodeBlock parses a raw block (without checksum) into a Block.
+// Validates that the offset table is well-formed: all offsets must
+// be within the entry data region and strictly ascending.
 func DecodeBlock(data []byte) (*Block, error) {
 	if len(data) < blockCountSize {
-		return nil, fmt.Errorf("sstable: block too short (%d bytes)", len(data))
+		return nil, fmt.Errorf("%w: too shrot (%d bytes)", ErrCorruptBlock, len(data))
 	}
 
 	numEntries := int(binary.LittleEndian.Uint16(data[len(data)-blockCountSize:]))
 	if numEntries == 0 {
-		return nil, fmt.Errorf("sstable: block has zero entries")
+		return nil, fmt.Errorf("%w: zero entries", ErrCorruptBlock)
 	}
 
 	offsetTableSize := numEntries*blockCountSize + blockCountSize
 	if len(data) < offsetTableSize {
-		return nil, fmt.Errorf("sstable: block too short for offset table")
+		return nil, fmt.Errorf("%w: too short for offset table", ErrCorruptBlock)
 	}
 
-	offsetStart := len(data) - offsetTableSize
+	entryRegionEnd := len(data) - offsetTableSize
+	offsetStart := entryRegionEnd
+
 	offsets := make([]uint16, numEntries)
 	for i := 0; i < numEntries; i++ {
-		offsets[i] = binary.LittleEndian.Uint16(data[offsetStart+i*blockOffsetSize:])
+		offset := binary.LittleEndian.Uint16(data[offsetStart+i*blockOffsetSize:])
+
+		// Validate: offset must be within the entry data region
+		if int(offset) >= entryRegionEnd {
+			return nil, fmt.Errorf("%w: offset[%d]=%d outside entry region [0, %d)", ErrCorruptBlock, i, offset, entryRegionEnd)
+		}
+
+		// Validate: offsets must be strictly ascending (except first)
+		if i > 0 && offset <= offsets[i-1] {
+			return nil, fmt.Errorf("%w: offset[%d]=%d not after offset[%d]=%d", ErrCorruptBlock, i, offset, i-1, offsets[i-1])
+		}
+
+		offsets[i] = offset
 	}
 
 	return &Block{
-		data:       data,
-		offsets:    offsets,
-		numEntries: numEntries,
+		data:           data,
+		offsets:        offsets,
+		numEntries:     numEntries,
+		entryRegionEnd: entryRegionEnd,
 	}, nil
 }
 
-// readEntry decodes the entry at the given offsets table index.
+// readEntry decodes the entry at the given offset table index.
+// All bounds checks are against the entry data region, not the
+// full block, so corrupted lengths cannot be read into the offset table.
 func (b *Block) readEntry(idx int) (key []byte, value kv.Value, err error) {
 	if idx < 0 || idx >= b.numEntries {
-		return nil, kv.Value{}, fmt.Errorf("sstable: block entry index %d out of range [0, %d)", idx, b.numEntries)
+		return nil, kv.Value{}, fmt.Errorf("%w: entry index %d out of range [0, %d)", ErrCorruptBlock, idx, b.numEntries)
 	}
 
 	offset := int(b.offsets[idx])
 	if offset+blockEntryHeader > len(b.data) {
-		return nil, kv.Value{}, fmt.Errorf("sstable: block entry header truncated at index %d", idx)
+		return nil, kv.Value{}, fmt.Errorf("%w: entry header truncated at index %d", ErrCorruptBlock, idx)
 	}
 
 	keyLen := int(binary.LittleEndian.Uint16(b.data[offset:]))
@@ -208,8 +229,8 @@ func (b *Block) readEntry(idx int) (key []byte, value kv.Value, err error) {
 	flag := b.data[offset]
 	offset += blockFlagSize
 
-	if offset+keyLen > len(b.data) {
-		return nil, kv.Value{}, fmt.Errorf("sstable: block entry key truncated at index %d", idx)
+	if offset+keyLen > b.entryRegionEnd {
+		return nil, kv.Value{}, fmt.Errorf("%w: entry key truncated at index %d", ErrCorruptBlock, idx)
 	}
 
 	key = b.data[offset : offset+keyLen]
@@ -217,14 +238,17 @@ func (b *Block) readEntry(idx int) (key []byte, value kv.Value, err error) {
 
 	switch flag {
 	case blockFlagPut:
-		if offset+valueLen > len(b.data) {
-			return nil, kv.Value{}, fmt.Errorf("sstable: block entry value truncated at index: %d", idx)
+		if offset+valueLen > b.entryRegionEnd {
+			return nil, kv.Value{}, fmt.Errorf("%w: entry value truncated at index %d", ErrCorruptBlock, idx)
 		}
 		value = kv.NewValue(b.data[offset : offset+valueLen])
 	case blockFlagTombstone:
+		if valueLen != 0 {
+			return nil, kv.Value{}, fmt.Errorf("%w: tombstone at index %d has non-zero value_len %d", ErrCorruptBlock, idx, valueLen)
+		}
 		value = kv.NewTombstone()
 	default:
-		return nil, kv.Value{}, fmt.Errorf("sstable: invalid block entry flag %d at index %d", flag, idx)
+		return nil, kv.Value{}, fmt.Errorf("%w: invalid flag %d at index %d", ErrCorruptBlock, flag, idx)
 	}
 
 	return key, value, nil
