@@ -34,7 +34,7 @@ const (
 	seqSize      = 8
 	keyLenSize   = 2
 	valueLenSize = 4
-	entryHeader  = flagSize + keyLenSize + valueLenSize // 15 bytes per entry
+	entryHeader  = flagSize + seqSize + keyLenSize + valueLenSize // 15 bytes per entry
 
 	flagPut       byte = 0
 	flagTombstone byte = 1
