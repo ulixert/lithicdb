@@ -69,7 +69,7 @@ func BloomMayContain(filter, key []byte) bool {
 	}
 
 	k := int(filter[len(filter)-1])
-	if k > 30 {
+	if k < 1 || k > 30 {
 		// Reserved for future filter formats; assume present
 		return true
 	}
