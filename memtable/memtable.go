@@ -10,6 +10,11 @@ import (
 // Memtable is a thread-safe, ordered, in-memory key-value store backed
 // by a skip list. It is the write target for the LSM engine.
 //
+// Keys stored in the memtable are internal keys (user_key + inverted
+// sequence number). This means every write is a unique insert, and
+// multiple versions of the same user key coexist in sorted order
+// (newest first for the same user key).
+//
 // A Memtable starts as active (accepting writes). When it reaches its
 // size threshold, it is frozen and becomes immutable, waiting to be
 // flushed to an SSTable on disk.
@@ -34,30 +39,27 @@ func (m *Memtable) ID() uint64 {
 	return m.id
 }
 
-// Put inserts or updates a key-value pair.
-func (m *Memtable) Put(key, value []byte) {
+// Put inserts an internal key with its value. The caller (the DB
+// engine) is responsible for constructing the internal key via
+// kv.MakeInternalKey(userKey, seq).
+func (m *Memtable) Put(internalKey []byte, value kv.Value) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sl.Put(key, kv.NewValue(value))
+	m.sl.Put(internalKey, value)
 }
 
-// Delete marks a key as deleted by writing a tombstone.
-func (m *Memtable) Delete(key []byte) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sl.Put(key, kv.NewTombstone())
-}
-
-// Get returns the value for the given key. The second return value
-// indicates whether the key was found. If the key was deleted
+// Get returns the newest version of a user key. The second return
+//
+//	value indicates whether the key was found. If the key was deleted
+//
 // (tombstone), found is true and Value.Tombstone is set.
-func (m *Memtable) Get(key []byte) (kv.Value, bool) {
+func (m *Memtable) Get(userKey []byte) (kv.Value, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.sl.Get(key)
+	return m.sl.Get(userKey)
 }
 
-// Scan returns an iterator over all entries in sorted key order.
+// Scan returns an iterator over all entries in internal key order.
 //
 // The returned iterator holds a read lock on the memtable.
 // Callers MUST call Close() when done to release the lock.
@@ -70,8 +72,8 @@ func (m *Memtable) Scan() iterator.Iterator {
 	}
 }
 
-// ScanRange returns an iterator over entries in [start, end).
-// If start is nil, the scan begins from the first key.
+// ScanRange returns an iterator over entries whose user key is in
+// [start, end). If start is nil, the scan begins from the first key.
 // If end is nil, the scan continues through the last key.
 //
 // The returned iterator holds a read lock on the memtable.

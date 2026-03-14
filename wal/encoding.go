@@ -18,9 +18,10 @@ import (
 // Entry format:
 //
 //	[flag:      1 byte]   0 = put, 1 = tombstone
+//  [seq:       8 bytes]  sequence number (little-endian)
 //	[key_len:   2 bytes]  max key size: 64KB
 //	[value_len: 4 bytes]  max value size: 4GB (0 for tombstones)
-//	[key]
+//	[key]                 user key (not internal key)
 //	[value]               omitted when flag = tombstone
 
 const (
@@ -30,9 +31,10 @@ const (
 	headerSize   = checksumSize + lengthSize // 8 bytes before payload
 
 	flagSize     = 1
+	seqSize      = 8
 	keyLenSize   = 2
 	valueLenSize = 4
-	entryHeader  = flagSize + keyLenSize + valueLenSize // 7 bytes per entry
+	entryHeader  = flagSize + keyLenSize + valueLenSize // 15 bytes per entry
 
 	flagPut       byte = 0
 	flagTombstone byte = 1
@@ -46,7 +48,8 @@ var (
 
 // Entry represents a single key-value operation in the WAL.
 type Entry struct {
-	Key   []byte
+	Seq   uint64
+	Key   []byte // user key
 	Value kv.Value
 }
 
@@ -80,6 +83,9 @@ func encodeRecord(entries []Entry) []byte {
 			buf[offset] = flagPut
 		}
 		offset += flagSize
+
+		binary.LittleEndian.PutUint64(buf[offset:], e.Seq)
+		offset += seqSize
 
 		binary.LittleEndian.PutUint16(buf[offset:], uint16(len(e.Key)))
 		offset += keyLenSize
@@ -144,6 +150,9 @@ func decodeRecord(data []byte) ([]Entry, int, error) {
 		flag := data[offset]
 		offset += flagSize
 
+		seq := binary.LittleEndian.Uint64(data[offset:])
+		offset += seqSize
+
 		keyLen := int(binary.LittleEndian.Uint16(data[offset:]))
 		offset += keyLenSize
 
@@ -174,7 +183,7 @@ func decodeRecord(data []byte) ([]Entry, int, error) {
 			return nil, 0, ErrInvalidFlag
 		}
 
-		entries[i] = Entry{Key: key, Value: value}
+		entries[i] = Entry{Seq: seq, Key: key, Value: value}
 	}
 
 	return entries, totalLen, nil

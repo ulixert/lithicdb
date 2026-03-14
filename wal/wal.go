@@ -26,7 +26,8 @@ func walFileName(id uint64) string {
 
 // Create creates a new WAL file for the given memtable ID in dir.
 // Durability is ensured by explicit Sync calls after each write,
-// rather than O_SYNC, so batch writes pay the sync cost once per record.
+// rather than O_SYNC, so that batch writes only pay the sync
+// cost once per record.
 func Create(dir string, id uint64) (*WAL, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("wal: create directory: %w", err)
@@ -53,21 +54,21 @@ func Open(dir string, id uint64) (*WAL, error) {
 }
 
 // Put writes a single key-value entry to the WAL and syncs to disk.
-func (w *WAL) Put(key, value []byte) error {
+func (w *WAL) Put(key, value []byte, seq uint64) error {
 	return w.WriteEntries([]Entry{
-		{Key: key, Value: kv.NewValue(value)},
+		{Seq: seq, Key: key, Value: kv.NewValue(value)},
 	})
 }
 
 // Delete writes a tombstone entry to the WAL and syncs to disk.
-func (w *WAL) Delete(key []byte) error {
+func (w *WAL) Delete(key []byte, seq uint64) error {
 	return w.WriteEntries([]Entry{
-		{Key: key, Value: kv.NewTombstone()},
+		{Seq: seq, Key: key, Value: kv.NewTombstone()},
 	})
 }
 
 // WriteEntries writes a batch of entries as a single WAL record
-// and syncs it to disk.
+// and syncs it to disk. Either all entries are persisted or none are.
 //
 // If WriteEntries returns nil, the full record was written and synced.
 // If it returns an error, the WAL file may contain a partially written
@@ -97,6 +98,13 @@ func (w *WAL) Close() error {
 // flushed to an SSTable.
 func (w *WAL) Remove() error {
 	return os.Remove(w.path)
+}
+
+// RemoveByID deletes the WAL file for the given memtable ID.
+// Ignores the error if the file does not exist.
+func RemoveByID(dir string, id uint64) {
+	path := filepath.Join(dir, walFileName(id))
+	_ = os.Remove(path)
 }
 
 // Path returns the file path of the WAL.
