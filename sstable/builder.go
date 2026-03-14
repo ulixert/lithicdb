@@ -82,8 +82,9 @@ func (b *Builder) Add(key []byte, value kv.Value) error {
 		copy(b.firstKey, key)
 	}
 
-	// Store hash for bloom filter (4 bytes per key instead of full copy)
-	b.hashes = append(b.hashes, BloomHash(key))
+	// Store hash of USER KEY for bloom filter (4 bytes per key instead of full copy)
+	// Point lookups search by user key, so the bloom filter must match.
+	b.hashes = append(b.hashes, BloomHash(kv.UserKey(key)))
 
 	// Track previous key for sorted order validation
 	b.prevKey = append(b.prevKey[:0], key...)

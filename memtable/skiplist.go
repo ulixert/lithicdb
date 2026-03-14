@@ -9,20 +9,20 @@ import (
 )
 
 const (
-	maxHeight   = 12   //supports ~16M entries with p=0.25
+	maxHeight   = 12   // supports ~16M entries with p=0.25
 	probability = 0.25 // probability of promoting a node to the next level
 )
 
 // skipListNode is a single node in the skip list.
 // Each node has forwarded pointers at multiple levels.
 type skipListNode struct {
-	key   []byte
+	key   []byte // internal key (user_key + inverted seq)
 	value kv.Value
 	next  []*skipListNode // next[i] is the next node at level i
 }
 
 // SkipList is a probabilistic, ordered data structure that supports
-// average O(log n) search, insert, and delete. It is the backing
+// average O(log n) search and insert. It is the backing
 // store for the memtable.
 //
 // A skip list is a layered linked list. The bottom level (level 0)
@@ -80,21 +80,12 @@ func (s *SkipList) findGreaterOrEqual(target []byte, prev []*skipListNode) *skip
 	return x.next[0]
 }
 
-// Put inserts or updates a key-value pair in the skip list.
-// If the key already exists, its value is overwritten.
-func (s *SkipList) Put(key []byte, value kv.Value) {
+// Put inserts an internal key-value pair. Every internal key is unique
+// (different sequence number), so this always inserts a new node.
+func (s *SkipList) Put(internalKey []byte, value kv.Value) {
 	prev := make([]*skipListNode, maxHeight)
-	found := s.findGreaterOrEqual(key, prev)
+	s.findGreaterOrEqual(internalKey, prev)
 
-	// Key already exists - update in place
-	if found != nil && bytes.Equal(found.key, key) {
-		s.dataSize -= found.value.EncodedSize()
-		found.value = value
-		s.dataSize += value.EncodedSize()
-		return
-	}
-
-	// Insert a new node
 	h := s.randomHeight()
 	if h > s.height {
 		for i := s.height; i < h; i++ {
@@ -104,7 +95,7 @@ func (s *SkipList) Put(key []byte, value kv.Value) {
 	}
 
 	node := &skipListNode{
-		key:   key,
+		key:   internalKey,
 		value: value,
 		next:  make([]*skipListNode, h),
 	}
@@ -115,16 +106,23 @@ func (s *SkipList) Put(key []byte, value kv.Value) {
 	}
 
 	s.size++
-	s.dataSize += int64(len(key)) + value.EncodedSize()
+	s.dataSize += int64(len(internalKey)) + value.EncodedSize()
 }
 
-// Get returns the value for the given key and true if found,
-// or an empty Value and false if not found.
-func (s *SkipList) Get(key []byte) (kv.Value, bool) {
-	found := s.findGreaterOrEqual(key, nil)
-	if found != nil && bytes.Equal(found.key, key) {
+// Get finds the newest version of a user key by seeking to
+// MakeSearchKey(userKey), which sorts before all real versions.
+// Returns the value and true if found, or empty Value and false.
+func (s *SkipList) Get(userKey []byte) (kv.Value, bool) {
+	searchKey := kv.MakeSearchKey(userKey)
+	found := s.findGreaterOrEqual(searchKey, nil)
+
+	// The first entry >= searchKey is the newest version of this user key
+	// (if it exists), because searchKey has MaxSeqNum, which inverts to
+	// all zeros, sorting before any real inverted seq.
+	if found != nil && bytes.Equal(kv.UserKey(found.key), userKey) {
 		return found.value, true
 	}
+
 	return kv.Value{}, false
 }
 
@@ -144,17 +142,26 @@ func (s *SkipList) Scan() *SkipListIterator {
 	return newSkipListIterator(s.head.next[0], nil)
 }
 
-// ScanRange returns an iterator over entries in [start, end).
+// ScanRange returns an iterator over entries in [start, end) by user key.
 // If start is nil, the scan begins from the first key.
 // If end is nil, the scan continues through the last key.
+// Bounds are user keys, not internal keys.
 func (s *SkipList) ScanRange(start, end []byte) *SkipListIterator {
 	var startNode *skipListNode
-
 	if start == nil {
 		startNode = s.head.next[0]
 	} else {
-		startNode = s.findGreaterOrEqual(start, nil)
+		// Seek to the newest version of the start key
+		searchKey := kv.MakeSearchKey(start)
+		startNode = s.findGreaterOrEqual(searchKey, nil)
 	}
 
-	return newSkipListIterator(startNode, end)
+	// Convert the end user key to an internal key for comparison.
+	// MakeSearchKey(end) sorts before all versions of the end, which
+	// makes the bound exclusive on the user key.
+	var endInternalKey []byte
+	if end != nil {
+		endInternalKey = kv.MakeSearchKey(end)
+	}
+	return newSkipListIterator(startNode, endInternalKey)
 }

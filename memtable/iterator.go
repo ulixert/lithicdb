@@ -8,6 +8,9 @@ import (
 // SkipListIterator walks the skip list at level 0 in sorted key order.
 // It implements iterator.Iterator.
 //
+// Key() returns internal keys (user_key + inverted seq). Use kv.UserKey()
+// and kv.SeqNum() to extract components.
+//
 // Unlike SSTable iterators, the slices returned by Key() and Value()
 // remain valid after Next() because each skip list node owns its data.
 // However, callers should still follow the Iterator contract and not

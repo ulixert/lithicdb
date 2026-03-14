@@ -78,6 +78,17 @@ func (b *BlockBuilder) Add(key []byte, value kv.Value) (bool, error) {
 		return false, fmt.Errorf("%w (%d)", ErrBlockEntryLimit, maxBlockEntries)
 	}
 
+	// Entries must be added in strict ascending internal-key order.
+	// This is required because block lookups use binary search.
+	if len(b.lastKey) > 0 && bytes.Compare(key, b.lastKey) <= 0 {
+		return false, fmt.Errorf(
+			"%w: keys must be added in strict ascending order (prev=%x, new=%x)",
+			ErrCorruptBlock,
+			b.lastKey,
+			key,
+		)
+	}
+
 	entrySize := blockEntryHeader + len(key)
 	if !value.Tombstone {
 		entrySize += len(value.Data)
@@ -275,30 +286,43 @@ func (b *Block) readEntry(idx int) (key []byte, value kv.Value, err error) {
 	return key, value, nil
 }
 
-// Get searches for a key in the block using binary search.
-// Returns the value and true if found, or empty value and false if not.
-func (b *Block) Get(target []byte) (kv.Value, bool, error) {
-	low, high := 0, b.numEntries-1
+// Get searches for the newest version of a user key in the block.
+// Constructs a search key (user_key + MaxSeqNum) and finds the first
+// internal key >= it, which is the newest version if the user key exists.
+func (b *Block) Get(userKey []byte) (kv.Value, bool, error) {
+	searchKey := kv.MakeSearchKey(userKey)
 
-	for low <= high {
+	// Binary search: find the first entry >= searchKey
+	low, high := 0, b.numEntries
+	for low < high {
 		mid := low + (high-low)/2
-		key, value, err := b.readEntry(mid)
+		key, _, err := b.readEntry(mid)
 		if err != nil {
 			return kv.Value{}, false, err
 		}
-
-		cmp := bytes.Compare(key, target)
-		switch {
-		case cmp < 0:
+		if bytes.Compare(key, searchKey) < 0 {
 			low = mid + 1
-		case cmp > 0:
-			high = mid - 1
-		default:
-			return value, true, nil
+		} else {
+			high = mid
 		}
 	}
 
-	return kv.Value{}, false, nil
+	// low is now the index of the first entry >= searchKey
+	if low >= b.numEntries {
+		return kv.Value{}, false, nil
+	}
+
+	key, value, err := b.readEntry(low)
+	if err != nil {
+		return kv.Value{}, false, err
+	}
+
+	// Check that the user key actually matches
+	if !bytes.Equal(kv.UserKey(key), userKey) {
+		return kv.Value{}, false, nil
+	}
+
+	return value, true, nil
 }
 
 // FirstKey returns the first (smallest) key in the block.

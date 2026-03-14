@@ -17,7 +17,7 @@ import (
 // Reader is safe for concurrent use by multiple goroutines.
 type Reader struct {
 	id       uint64
-	data     []byte // mmap candidate - current read into memory
+	data     []byte // mmap candidate - currently read into memory
 	bloom    []byte
 	firstKey []byte
 	metas    []blockMeta
@@ -131,22 +131,24 @@ func (r *Reader) readBlock(blockIdx int) (*Block, error) {
 	return DecodeBlock(blockData)
 }
 
-// Get looks up a key in the SSTable. Returns the value and true if
-// found, or empty value and false if not found.
+// Get looks up the newest version of a user key in the SSTable. Returns the
+// value and true if found, or empty value and false if not found.
 //
 // The lookup path:
-// 1. Check bloom filter - skip the entire SSTable if the key is definitely absent
-// 2. Binary search the index to find which block might contain the key
-// 3. Read and verify that single block
-// 4. Binary search within the block
-func (r *Reader) Get(key []byte) (value kv.Value, found bool, err error) {
-	// Step 1: bloom filter
-	if !r.MayContain(key) {
+//  1. Check bloom filter (hashed on the user key) - skip the entire SSTable
+//     if the key is definitely absent
+//  2. Binary search the index to find which block might contain the key
+//  3. Read and verify that single block
+//  4. Binary search within the block for the newest version of the user key
+func (r *Reader) Get(userKey []byte) (value kv.Value, found bool, err error) {
+	// Step 1: bloom filter (uses user key hash)
+	if !r.MayContain(userKey) {
 		return kv.Value{}, false, nil
 	}
 
-	// Step 2: find the block
-	blockIdx := r.findBlock(key)
+	// Step 2: find the block using an internal search key
+	searchKey := kv.MakeSearchKey(userKey)
+	blockIdx := r.findBlock(searchKey)
 	if blockIdx < 0 {
 		return kv.Value{}, false, nil
 	}
@@ -157,8 +159,8 @@ func (r *Reader) Get(key []byte) (value kv.Value, found bool, err error) {
 		return kv.Value{}, false, err
 	}
 
-	// Step 4: search within the block
-	return block.Get(key)
+	// Step 4: search within the block by user key
+	return block.Get(userKey)
 }
 
 // findBlock returns the index of the block that might contain the key,
