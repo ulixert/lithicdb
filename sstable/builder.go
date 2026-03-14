@@ -1,6 +1,7 @@
 package sstable
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -12,7 +13,8 @@ import (
 )
 
 // Builder constructs an SSTable file from a sorted stream of
-// key-value entries. Entries must be added in sorted key order.
+// key-value entries. Entries must be added in strictly ascending
+// sorted key order.
 //
 // Usage:
 //
@@ -27,10 +29,17 @@ type Builder struct {
 
 	block    *BlockBuilder
 	metas    []blockMeta
-	keys     [][]byte // all keys, for bloom filter
+	keys     [][]byte // all keys, for bloom filter (see note below)
 	firstKey []byte
+	prevKey  []byte // prev key added, for sorted order validation
 	offset   uint64 // current write offset in the file
 	buf      []byte // accumulated file bytes
+	finished bool
+
+	// NOTE: keys hold a copy of every key for bloom filter construction.
+	// For a 64MB memtable with 16-byte keys, this is ~64MB of copies.
+	// A future optimization is to store only key hashes (4 bytes each)
+	// and build the bloom filter incrementally.
 }
 
 // sstFileName returns the SSTable file name for a given ID.
@@ -62,17 +71,28 @@ func NewBuilder(dir string, id uint64, blockSize int) *Builder {
 // in strictly ascending sorted order. When the current block is full,
 // it is flushed and a new block is started.
 func (b *Builder) Add(key []byte, value kv.Value) error {
-	// Track the first key of the entire SSTable
-	if b.firstKey == nil {
-		b.firstKey = append(b.firstKey[:0], key...)
+	if b.finished {
+		return fmt.Errorf("sstable: Add called after Finish")
 	}
 
-	// Copy key for bloom filter.
-	// keyCopy persists in b.keys, so b.lastKey can reference it
+	// Verify sorted order
+	if b.prevKey != nil && bytes.Compare(key, b.prevKey) <= 0 {
+		return fmt.Errorf("sstable: keys not in sorted order: %q <= %q", key, b.prevKey)
+	}
+
+	// Track the first key of the entire SSTable
+	if b.firstKey == nil {
+		b.firstKey = make([]byte, len(key))
+		copy(b.firstKey, key)
+	}
+
+	// Copy key for bloom filter and sorted order validation.
+	// keyCopy persists in b.keys, so b.prevKey can reference it
 	// safely - it stays valid until Finish.
 	keyCopy := make([]byte, len(key))
 	copy(keyCopy, key)
 	b.keys = append(b.keys, keyCopy)
+	b.prevKey = keyCopy
 
 	ok, err := b.block.Add(key, value)
 	if err != nil {
@@ -131,7 +151,24 @@ func (b *Builder) flushBlock() error {
 
 // Finish flushes the remaining block, writes the bloom filter,
 // index block, and footer, and writes the complete SSTable to disk.
+//
+// The file is written atomically: data goes to a .tmp file first,
+// which is fsynced, then renamed to the final .sst path. On crash,
+// the .tmp file may be left behind and should be cleaned up on
+// startup (see CleanupTempFiles).
+//
+// Finish must be called exactly once. Subsequent calls return an error.
 func (b *Builder) Finish() error {
+	if b.finished {
+		return fmt.Errorf("sstable: Finish called twice")
+	}
+	// Finish flushes the remaining block, writes the bloom filter,
+	// index block, and footer, and writes the complete SSTable to disk.
+	//
+	// Finish consumes the builder. After Finish is called, the builder
+	// must not be reused, even if Finish returns an error.
+	b.finished = true
+
 	if b.firstKey == nil {
 		return ErrEmptySSTable
 	}
@@ -168,7 +205,11 @@ func (b *Builder) Finish() error {
 	}
 	b.buf = append(b.buf, encodeFooter(f)...)
 
-	// Write file atomically: write to temp, then rename
+	// Write the file atomically with proper durability:
+	// 1. Write to a temp file
+	// 2. Fsync the temp file (data is durable on disk)
+	// 3. Rename temp -> final (atomic metadata update)
+	// 4. Fsync the directory (rename is durable)
 	if err := os.MkdirAll(b.dir, 0o750); err != nil {
 		return fmt.Errorf("sstable: create directory: %w", err)
 	}
@@ -176,8 +217,9 @@ func (b *Builder) Finish() error {
 	finalPath := SSTPath(b.dir, b.id)
 	tmpPath := finalPath + ".tmp"
 
-	if err := os.WriteFile(tmpPath, b.buf, 0o640); err != nil {
-		return fmt.Errorf("sstable: write temp file: %w", err)
+	if err := writeDurable(tmpPath, b.buf); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
 	}
 
 	if err := os.Rename(tmpPath, finalPath); err != nil {
@@ -185,11 +227,49 @@ func (b *Builder) Finish() error {
 		return fmt.Errorf("sstable: rename: %w", err)
 	}
 
+	if err := syncDir(b.dir); err != nil {
+		return fmt.Errorf("sstable: sync directory: %w", err)
+	}
+
 	return nil
 }
 
 // EstimatedSize returns the approximate size of the SSTable built so far.
-// Useful for deciding when to stop adding entries.
+// This is a lower bound - it does not include the bloom filter, index
+// block, or footer, which are written during Finish(). Useful for
+// deciding when to stop adding entries; being slightly under is safe
+// (flushes a bit early, wastes minimal space).
 func (b *Builder) EstimatedSize() uint64 {
 	return b.offset + uint64(len(b.block.data))
+}
+
+// writeDurable writes data to path and fsyncs the file.
+func writeDurable(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
+		return fmt.Errorf("sstable: create temp file: %w", err)
+	}
+
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sstable: write temp file: %w", err)
+	}
+
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sstable: sync temp file: %w", err)
+	}
+
+	return f.Close()
+}
+
+// syncDir fsyncs a directory to ensure that renames and file
+// creations within it are durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
