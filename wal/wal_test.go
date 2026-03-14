@@ -1,9 +1,7 @@
 package wal
 
 import (
-	"bytes"
-	"encoding/binary"
-	"hash/crc32"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,204 +9,25 @@ import (
 	"github.com/ulixert/lithicdb/kv"
 )
 
-// ============================================================
-// Encoding / Decoding round-trip tests
-// ============================================================
-
-func TestEncodeDecodeRoundTrip_SinglePut(t *testing.T) {
-	entries := []Entry{
-		{Key: []byte("hello"), Value: kv.NewValue([]byte("world"))},
-	}
-
-	data := encodeRecord(entries)
-	decoded, n, err := decodeRecord(data)
-	if err != nil {
-		t.Fatalf("decodeRecord error: %v", err)
-	}
-
-	if n != len(data) {
-		t.Errorf("consumed %d bytes, want %d", n, len(data))
-	}
-
-	assertEntriesEqual(t, decoded, entries)
+func tempDir(t *testing.T) string {
+	t.Helper()
+	return t.TempDir()
 }
-
-func TestEncodeDecodeRoundTrip_SingleTombstone(t *testing.T) {
-	entries := []Entry{
-		{Key: []byte("deleted-key"), Value: kv.NewTombstone()},
-	}
-
-	data := encodeRecord(entries)
-	decoded, _, err := decodeRecord(data)
-	if err != nil {
-		t.Fatalf("decodeRecord error: %v", err)
-	}
-
-	assertEntriesEqual(t, decoded, entries)
-}
-
-func TestEncodeDecodeRoundTrip_Batch(t *testing.T) {
-	entries := []Entry{
-		{Key: []byte("key1"), Value: kv.NewValue([]byte("val1"))},
-		{Key: []byte("key2"), Value: kv.NewValue([]byte("val2"))},
-		{Key: []byte("key3"), Value: kv.NewTombstone()},
-		{Key: []byte("key4"), Value: kv.NewValue([]byte("val4"))},
-	}
-
-	data := encodeRecord(entries)
-	decoded, _, err := decodeRecord(data)
-	if err != nil {
-		t.Fatalf("decodeRecord error: %v", err)
-	}
-
-	assertEntriesEqual(t, decoded, entries)
-}
-
-func TestEncodeDecodeRoundTrip_EmptyValue(t *testing.T) {
-	// Empty value is NOT a tombstone
-	entries := []Entry{
-		{Key: []byte("key"), Value: kv.NewValue([]byte{})},
-	}
-
-	data := encodeRecord(entries)
-	decoded, _, err := decodeRecord(data)
-	if err != nil {
-		t.Fatalf("decodeRecord error: %v", err)
-	}
-
-	if len(decoded) != 1 {
-		t.Fatalf("got %d entries, want 1", len(decoded))
-	}
-
-	if decoded[0].Value.Tombstone {
-		t.Error("empty value should not be decoded as tombstone")
-	}
-
-	if len(decoded[0].Value.Data) != 0 {
-		t.Errorf("expected empty data, got %q", decoded[0].Value.Data)
-	}
-}
-
-func TestEncodeDecodeRoundTrip_LargeKey(t *testing.T) {
-	// Key near the 64KB limit (key_len is uint16)
-	bigKey := bytes.Repeat([]byte("k"), 60000)
-	entries := []Entry{
-		{Key: bigKey, Value: kv.NewValue([]byte("v"))},
-	}
-
-	data := encodeRecord(entries)
-	decoded, _, err := decodeRecord(data)
-	if err != nil {
-		t.Fatalf("decodeRecord error: %v", err)
-	}
-
-	if !bytes.Equal(decoded[0].Key, bigKey) {
-		t.Error("large key not preserved through encode/decode")
-	}
-}
-
-func TestEncodeDecodeRoundTrip_LargeValue(t *testing.T) {
-	bigVal := bytes.Repeat([]byte("v"), 1<<20) // 1MB
-	entries := []Entry{
-		{Key: []byte("key"), Value: kv.NewValue(bigVal)},
-	}
-
-	data := encodeRecord(entries)
-	decoded, _, err := decodeRecord(data)
-	if err != nil {
-		t.Fatalf("decodeRecord error: %v", err)
-	}
-
-	if !bytes.Equal(decoded[0].Value.Data, bigVal) {
-		t.Error("large value not preserved through encode/decode")
-	}
-}
-
-// ============================================================
-// Decode error tests
-// ============================================================
-
-func TestDecode_TooShort(t *testing.T) {
-	_, _, err := decodeRecord([]byte{0x01, 0x02})
-	if err != ErrShortRecord {
-		t.Errorf("expected ErrShortRecord, got %v", err)
-	}
-}
-
-func TestDecode_Empty(t *testing.T) {
-	_, _, err := decodeRecord([]byte{})
-	if err != ErrShortRecord {
-		t.Errorf("expected ErrShortRecord, got %v", err)
-	}
-}
-
-func TestDecode_CorruptChecksum(t *testing.T) {
-	entries := []Entry{
-		{Key: []byte("key"), Value: kv.NewValue([]byte("val"))},
-	}
-
-	data := encodeRecord(entries)
-	// Flip a bit in the payload (after the checksum)
-	data[headerSize+2] ^= 0xFF
-
-	_, _, err := decodeRecord(data)
-	if err != ErrCorruptRecord {
-		t.Errorf("expected ErrCorruptRecord, got %v", err)
-	}
-}
-
-func TestDecode_TruncatedPayload(t *testing.T) {
-	entries := []Entry{
-		{Key: []byte("key"), Value: kv.NewValue([]byte("value"))},
-	}
-
-	data := encodeRecord(entries)
-	// Truncate half the payload
-	truncated := data[:headerSize+3]
-
-	_, _, err := decodeRecord(truncated)
-	if err != ErrShortRecord {
-		t.Errorf("expected ErrShortRecord, got %v", err)
-	}
-}
-
-func TestDecode_InvalidFlag(t *testing.T) {
-	entries := []Entry{
-		{Key: []byte("key"), Value: kv.NewValue([]byte("val"))},
-	}
-
-	data := encodeRecord(entries)
-
-	// Find the flag byte and set it to an invalid value
-	flagOffset := headerSize + countSize
-	data[flagOffset] = 0xFF
-
-	// Recompute checksum to isolate the flag error
-	checksum := crc32.ChecksumIEEE(data[checksumSize:])
-	binary.LittleEndian.PutUint32(data[:checksumSize], checksum)
-
-	_, _, err := decodeRecord(data)
-	if err != ErrInvalidFlag {
-		t.Errorf("expected ErrInvalidFlag, got %v", err)
-	}
-}
-
-// ============================================================
-// WAL file write and recovery tests
-// ============================================================
 
 func TestWAL_PutAndRecover(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 
 	w, err := Create(dir, 1)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := w.Put([]byte("hello"), []byte("world")); err != nil {
+	if err := w.Put([]byte("hello"), []byte("world"), 1); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-
+	if err := w.Put([]byte("foo"), []byte("bar"), 2); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -218,27 +37,56 @@ func TestWAL_PutAndRecover(t *testing.T) {
 		t.Fatalf("Recover: %v", err)
 	}
 
-	if len(entries) != 1 {
-		t.Fatalf("got %d entries, want 1", len(entries))
+	if len(entries) != 2 {
+		t.Fatalf("recovered %d entries, want 2", len(entries))
 	}
 
-	assertEntriesEqual(t, entries, []Entry{
-		{Key: []byte("hello"), Value: kv.NewValue([]byte("world"))},
-	})
+	assertEntry(t, entries[0], 1, "hello", "world", false)
+	assertEntry(t, entries[1], 2, "foo", "bar", false)
 }
 
 func TestWAL_DeleteAndRecover(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 
 	w, err := Create(dir, 1)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := w.Delete([]byte("gone")); err != nil {
+	if err := w.Put([]byte("key"), []byte("value"), 1); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := w.Delete([]byte("key"), 2); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
 
+	entries, err := Recover(w.Path())
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("recovered %d entries, want 2", len(entries))
+	}
+
+	assertEntry(t, entries[0], 1, "key", "value", false)
+	assertEntry(t, entries[1], 2, "key", "", true)
+}
+
+func TestWAL_EmptyValue(t *testing.T) {
+	dir := tempDir(t)
+
+	w, err := Create(dir, 1)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := w.Put([]byte("key"), []byte{}, 1); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -249,33 +97,34 @@ func TestWAL_DeleteAndRecover(t *testing.T) {
 	}
 
 	if len(entries) != 1 {
-		t.Fatalf("got %d entries, want 1", len(entries))
+		t.Fatalf("recovered %d entries, want 1", len(entries))
 	}
 
-	if !entries[0].Value.Tombstone {
-		t.Error("expected tombstone")
+	if entries[0].Value.Tombstone {
+		t.Fatal("empty value should not be a tombstone")
+	}
+	if len(entries[0].Value.Data) != 0 {
+		t.Errorf("expected empty data, got %q", entries[0].Value.Data)
 	}
 }
 
-func TestWAL_MultipleRecords(t *testing.T) {
-	dir := t.TempDir()
+func TestWAL_BatchWrite(t *testing.T) {
+	dir := tempDir(t)
 
 	w, err := Create(dir, 1)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Write three separate records
-	if err := w.Put([]byte("a"), []byte("1")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	if err := w.Put([]byte("b"), []byte("2")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	if err := w.Delete([]byte("c")); err != nil {
-		t.Fatalf("Delete: %v", err)
+	batch := []Entry{
+		{Seq: 1, Key: []byte("a"), Value: kv.NewValue([]byte("1"))},
+		{Seq: 2, Key: []byte("b"), Value: kv.NewValue([]byte("2"))},
+		{Seq: 3, Key: []byte("c"), Value: kv.NewTombstone()},
 	}
 
+	if err := w.WriteEntries(batch); err != nil {
+		t.Fatalf("WriteEntries: %v", err)
+	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -286,240 +135,201 @@ func TestWAL_MultipleRecords(t *testing.T) {
 	}
 
 	if len(entries) != 3 {
-		t.Fatalf("got %d entries, want 3", len(entries))
+		t.Fatalf("recovered %d entries, want 3", len(entries))
 	}
 
-	// Verify order
-	if string(entries[0].Key) != "a" {
-		t.Errorf("entry 0 key = %q, want %q", entries[0].Key, "a")
-	}
-	if string(entries[1].Key) != "b" {
-		t.Errorf("entry 1 key = %q, want %q", entries[1].Key, "b")
-	}
-	if string(entries[2].Key) != "c" {
-		t.Errorf("entry 2 key = %q, want %q", entries[2].Key, "c")
-	}
-	if !entries[2].Value.Tombstone {
-		t.Error("entry 2 should be tombstone")
-	}
+	assertEntry(t, entries[0], 1, "a", "1", false)
+	assertEntry(t, entries[1], 2, "b", "2", false)
+	assertEntry(t, entries[2], 3, "c", "", true)
 }
 
-func TestWAL_BatchWrite(t *testing.T) {
-	dir := t.TempDir()
+func TestWAL_SeqNumberPreserved(t *testing.T) {
+	dir := tempDir(t)
 
 	w, err := Create(dir, 1)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	batch := []Entry{
-		{Key: []byte("k1"), Value: kv.NewValue([]byte("v1"))},
-		{Key: []byte("k2"), Value: kv.NewValue([]byte("v2"))},
-		{Key: []byte("k3"), Value: kv.NewTombstone()},
+	if err := w.Put([]byte("a"), []byte("1"), 100); err != nil {
+		t.Fatalf("Put: %v", err)
 	}
-
-	if err := w.WriteEntries(batch); err != nil {
-		t.Fatalf("WriteEntries: %v", err)
+	if err := w.Put([]byte("b"), []byte("2"), 200); err != nil {
+		t.Fatalf("Put: %v", err)
 	}
-
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if err := w.Delete([]byte("c"), 300); err != nil {
+		t.Fatalf("Delete: %v", err)
 	}
+	w.Close()
 
 	entries, err := Recover(w.Path())
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
-	assertEntriesEqual(t, entries, batch)
-}
-
-// ============================================================
-// Crash recovery / corruption tests
-// ============================================================
-
-func TestRecover_EmptyFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "000001.wal")
-
-	if err := os.WriteFile(path, []byte{}, 0o640); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	if entries[0].Seq != 100 {
+		t.Errorf("entry 0 seq = %d, want 100", entries[0].Seq)
 	}
-
-	entries, err := Recover(path)
-	if err != nil {
-		t.Fatalf("Recover: %v", err)
+	if entries[1].Seq != 200 {
+		t.Errorf("entry 1 seq = %d, want 200", entries[1].Seq)
 	}
-
-	if len(entries) != 0 {
-		t.Errorf("expected 0 entries from empty WAL, got %d", len(entries))
+	if entries[2].Seq != 300 {
+		t.Errorf("entry 2 seq = %d, want 300", entries[2].Seq)
 	}
 }
 
-func TestRecover_CorruptTail(t *testing.T) {
-	dir := t.TempDir()
+func TestWAL_RecoverCorruptTail(t *testing.T) {
+	dir := tempDir(t)
 
-	// Write two valid records
 	w, err := Create(dir, 1)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := w.Put([]byte("good1"), []byte("val1")); err != nil {
+	if err := w.Put([]byte("good1"), []byte("v1"), 1); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if err := w.Put([]byte("good2"), []byte("val2")); err != nil {
+	if err := w.Put([]byte("good2"), []byte("v2"), 2); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Append garbage to simulate a crash mid-write
 	f, err := os.OpenFile(w.Path(), os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
-		t.Fatalf("OpenFile: %v", err)
+		t.Fatalf("open for append: %v", err)
 	}
-	if _, err := f.Write([]byte("this is garbage from a crash")); err != nil {
-		t.Fatalf("Write garbage: %v", err)
+	if _, err := f.Write([]byte("this is corrupt garbage")); err != nil {
+		t.Fatalf("write garbage: %v", err)
 	}
 	f.Close()
 
-	// Recovery should return the two valid records
 	entries, err := Recover(w.Path())
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
 	if len(entries) != 2 {
-		t.Fatalf("got %d entries, want 2 (corrupt tail ignored)", len(entries))
+		t.Fatalf("recovered %d entries, want 2", len(entries))
 	}
 
-	if string(entries[0].Key) != "good1" {
-		t.Errorf("entry 0 key = %q, want %q", entries[0].Key, "good1")
-	}
-	if string(entries[1].Key) != "good2" {
-		t.Errorf("entry 1 key = %q, want %q", entries[1].Key, "good2")
-	}
+	assertEntry(t, entries[0], 1, "good1", "v1", false)
+	assertEntry(t, entries[1], 2, "good2", "v2", false)
 }
 
-func TestRecover_TruncatedRecord(t *testing.T) {
-	dir := t.TempDir()
-
-	// Write a valid record, then a truncated one
-	w, err := Create(dir, 1)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	if err := w.Put([]byte("safe"), []byte("data")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	// Encode another record and write only half of it
-	partialRecord := encodeRecord([]Entry{
-		{Key: []byte("lost"), Value: kv.NewValue([]byte("gone"))},
-	})
-	f, err := os.OpenFile(w.Path(), os.O_WRONLY|os.O_APPEND, 0o640)
-	if err != nil {
-		t.Fatalf("OpenFile: %v", err)
-	}
-	if _, err := f.Write(partialRecord[:len(partialRecord)/2]); err != nil {
-		t.Fatalf("Write partial: %v", err)
-	}
-	f.Close()
-
-	entries, err := Recover(w.Path())
-	if err != nil {
-		t.Fatalf("Recover: %v", err)
-	}
-
-	if len(entries) != 1 {
-		t.Fatalf("got %d entries, want 1 (truncated record ignored)", len(entries))
-	}
-
-	if string(entries[0].Key) != "safe" {
-		t.Errorf("key = %q, want %q", entries[0].Key, "safe")
-	}
-}
-
-func TestRecover_FlippedBitInMiddleRecord(t *testing.T) {
-	dir := t.TempDir()
+func TestWAL_RecoverTruncatedRecord(t *testing.T) {
+	dir := tempDir(t)
 
 	w, err := Create(dir, 1)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Write three records
-	if err := w.Put([]byte("first"), []byte("1")); err != nil {
+	if err := w.Put([]byte("survived"), []byte("yes"), 1); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if err := w.Put([]byte("second"), []byte("2")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	if err := w.Put([]byte("third"), []byte("3")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Read the file, find the second record, and flip a bit in its payload
 	data, err := os.ReadFile(w.Path())
 	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+		t.Fatalf("read: %v", err)
 	}
 
-	// Find offset of second record by decoding the first
-	_, firstLen, err := decodeRecord(data)
-	if err != nil {
-		t.Fatalf("decode first: %v", err)
+	partial := make([]byte, len(data)+4)
+	copy(partial, data)
+	partial[len(data)] = 0xFF
+	partial[len(data)+1] = 0xFF
+	partial[len(data)+2] = 0xFF
+	partial[len(data)+3] = 0xFF
+
+	if err := os.WriteFile(w.Path(), partial, 0o640); err != nil {
+		t.Fatalf("write: %v", err)
 	}
 
-	// Corrupt a byte in the second record's payload
-	corruptOffset := firstLen + headerSize + 2
-	if corruptOffset < len(data) {
-		data[corruptOffset] ^= 0xFF
-	}
-
-	if err := os.WriteFile(w.Path(), data, 0o640); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	// Recovery should return only the first record (corruption stops reading)
 	entries, err := Recover(w.Path())
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
 	if len(entries) != 1 {
-		t.Fatalf("got %d entries, want 1 (corrupt second record stops recovery)", len(entries))
+		t.Fatalf("recovered %d entries, want 1", len(entries))
 	}
 
-	if string(entries[0].Key) != "first" {
-		t.Errorf("key = %q, want %q", entries[0].Key, "first")
+	assertEntry(t, entries[0], 1, "survived", "yes", false)
+}
+
+func TestWAL_RecoverEmpty(t *testing.T) {
+	dir := tempDir(t)
+
+	w, err := Create(dir, 1)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	w.Close()
+
+	entries, err := Recover(w.Path())
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	if len(entries) != 0 {
+		t.Fatalf("recovered %d entries from empty WAL, want 0", len(entries))
 	}
 }
 
-func TestRecover_NonExistentFile(t *testing.T) {
-	_, err := Recover("/nonexistent/path/000001.wal")
-	if err == nil {
-		t.Error("expected error for non-existent file")
+func TestWAL_Remove(t *testing.T) {
+	dir := tempDir(t)
+
+	w, err := Create(dir, 1)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	w.Close()
+
+	if err := w.Remove(); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	if _, err := os.Stat(w.Path()); !os.IsNotExist(err) {
+		t.Fatalf("expected file to be deleted, got err: %v", err)
 	}
 }
 
-// ============================================================
-// FindWALFiles and RecoverDir tests
-// ============================================================
+func TestWAL_FindFiles(t *testing.T) {
+	dir := tempDir(t)
 
-func TestFindWALFiles_Empty(t *testing.T) {
-	dir := t.TempDir()
+	for _, id := range []uint64{3, 1, 5} {
+		w, err := Create(dir, id)
+		if err != nil {
+			t.Fatalf("Create(%d): %v", id, err)
+		}
+		w.Close()
+	}
+
+	nonWAL := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(nonWAL, []byte("ignore me"), 0o640); err != nil {
+		t.Fatalf("write non-WAL: %v", err)
+	}
+
+	ids, err := FindWALFiles(dir)
+	if err != nil {
+		t.Fatalf("FindWALFiles: %v", err)
+	}
+
+	if len(ids) != 3 {
+		t.Fatalf("found %d WAL files, want 3", len(ids))
+	}
+
+	if ids[0] != 1 || ids[1] != 3 || ids[2] != 5 {
+		t.Errorf("ids = %v, want [1, 3, 5]", ids)
+	}
+}
+
+func TestWAL_FindFiles_EmptyDir(t *testing.T) {
+	dir := tempDir(t)
 
 	ids, err := FindWALFiles(dir)
 	if err != nil {
@@ -527,290 +337,98 @@ func TestFindWALFiles_Empty(t *testing.T) {
 	}
 
 	if len(ids) != 0 {
-		t.Errorf("expected 0 WAL files, got %d", len(ids))
+		t.Fatalf("found %d WAL files in empty dir, want 0", len(ids))
 	}
 }
 
-func TestFindWALFiles_NonExistentDir(t *testing.T) {
-	ids, err := FindWALFiles("/nonexistent/wal/dir")
+func TestWAL_FindFiles_NonExistentDir(t *testing.T) {
+	ids, err := FindWALFiles("/nonexistent/path")
 	if err != nil {
 		t.Fatalf("FindWALFiles: %v", err)
 	}
 
 	if ids != nil {
-		t.Errorf("expected nil for non-existent dir, got %v", ids)
+		t.Fatalf("expected nil, got %v", ids)
 	}
 }
 
-func TestFindWALFiles_SortedOrder(t *testing.T) {
-	dir := t.TempDir()
+func TestWAL_RecoverDir(t *testing.T) {
+	dir := tempDir(t)
 
-	// Create WAL files out of order
-	for _, id := range []uint64{5, 1, 3, 2, 4} {
-		w, err := Create(dir, id)
-		if err != nil {
-			t.Fatalf("Create id=%d: %v", id, err)
-		}
-		w.Close()
-	}
-
-	ids, err := FindWALFiles(dir)
-	if err != nil {
-		t.Fatalf("FindWALFiles: %v", err)
-	}
-
-	if len(ids) != 5 {
-		t.Fatalf("got %d files, want 5", len(ids))
-	}
-
-	for i := 1; i < len(ids); i++ {
-		if ids[i] <= ids[i-1] {
-			t.Errorf("IDs not sorted: %v", ids)
-			break
-		}
-	}
-}
-
-func TestFindWALFiles_IgnoresNonWALFiles(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create a real WAL file
-	w, err := Create(dir, 1)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	w.Close()
-
-	// Create non-WAL files
-	os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("hi"), 0o640)
-	os.WriteFile(filepath.Join(dir, "data.sst"), []byte("data"), 0o640)
-	os.WriteFile(filepath.Join(dir, "notanumber.wal"), []byte("bad"), 0o640)
-
-	ids, err := FindWALFiles(dir)
-	if err != nil {
-		t.Fatalf("FindWALFiles: %v", err)
-	}
-
-	if len(ids) != 1 || ids[0] != 1 {
-		t.Errorf("expected [1], got %v", ids)
-	}
-}
-
-func TestRecoverDir_MultipleWALs(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create WAL 1 with two entries
 	w1, err := Create(dir, 1)
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf("Create(1): %v", err)
 	}
-	w1.Put([]byte("a"), []byte("1"))
-	w1.Put([]byte("b"), []byte("2"))
+	w1.Put([]byte("a"), []byte("1"), 1)
+	w1.Put([]byte("b"), []byte("2"), 2)
 	w1.Close()
 
-	// Create WAL 3 with one entry (skip ID 2)
 	w3, err := Create(dir, 3)
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf("Create(3): %v", err)
 	}
-	w3.Put([]byte("c"), []byte("3"))
+	w3.Put([]byte("c"), []byte("3"), 3)
+	w3.Delete([]byte("a"), 4)
 	w3.Close()
 
-	recovered, err := RecoverDir(dir)
+	result, err := RecoverDir(dir)
 	if err != nil {
 		t.Fatalf("RecoverDir: %v", err)
 	}
 
-	if len(recovered) != 2 {
-		t.Fatalf("got %d recovered WALs, want 2", len(recovered))
+	if len(result) != 2 {
+		t.Fatalf("recovered %d WALs, want 2", len(result))
 	}
 
-	// Should be in ascending ID order
-	if recovered[0].ID != 1 {
-		t.Errorf("recovered[0].ID = %d, want 1", recovered[0].ID)
-	}
-	if recovered[1].ID != 3 {
-		t.Errorf("recovered[1].ID = %d, want 3", recovered[1].ID)
+	if result[0].ID != 1 || result[1].ID != 3 {
+		t.Fatalf("WAL IDs = [%d, %d], want [1, 3]", result[0].ID, result[1].ID)
 	}
 
-	if len(recovered[0].Entries) != 2 {
-		t.Errorf("WAL 1: %d entries, want 2", len(recovered[0].Entries))
+	if len(result[0].Entries) != 2 {
+		t.Fatalf("WAL 1: %d entries, want 2", len(result[0].Entries))
 	}
-	if len(recovered[1].Entries) != 1 {
-		t.Errorf("WAL 3: %d entries, want 1", len(recovered[1].Entries))
+	assertEntry(t, result[0].Entries[0], 1, "a", "1", false)
+	assertEntry(t, result[0].Entries[1], 2, "b", "2", false)
+
+	if len(result[1].Entries) != 2 {
+		t.Fatalf("WAL 3: %d entries, want 2", len(result[1].Entries))
 	}
+	assertEntry(t, result[1].Entries[0], 3, "c", "3", false)
+	assertEntry(t, result[1].Entries[1], 4, "a", "", true)
 }
 
-func TestRecoverDir_EmptyDir(t *testing.T) {
-	dir := t.TempDir()
+func TestWAL_RecoverDir_Empty(t *testing.T) {
+	dir := tempDir(t)
 
-	recovered, err := RecoverDir(dir)
+	result, err := RecoverDir(dir)
 	if err != nil {
 		t.Fatalf("RecoverDir: %v", err)
 	}
 
-	if len(recovered) != 0 {
-		t.Errorf("expected 0 recovered WALs, got %d", len(recovered))
+	if result == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected 0 WALs, got %d", len(result))
 	}
 }
 
-func TestRecoverDir_NonExistentDir(t *testing.T) {
-	recovered, err := RecoverDir("/nonexistent/wal/dir")
-	if err != nil {
-		t.Fatalf("RecoverDir: %v", err)
-	}
-
-	if recovered != nil && len(recovered) != 0 {
-		t.Errorf("expected empty result, got %v", recovered)
-	}
-}
-
-func TestRecoverDir_IncludesEmptyWALs(t *testing.T) {
-	dir := t.TempDir()
-
-	// WAL 1: has data
-	w1, err := Create(dir, 1)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	w1.Put([]byte("key"), []byte("val"))
-	w1.Close()
-
-	// WAL 2: empty file (no records written)
-	w2, err := Create(dir, 2)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	w2.Close()
-
-	recovered, err := RecoverDir(dir)
-	if err != nil {
-		t.Fatalf("RecoverDir: %v", err)
-	}
-
-	// Both WALs should be present — empty WALs carry ID information
-	// needed for correct next-ID allocation on recovery.
-	if len(recovered) != 2 {
-		t.Fatalf("got %d recovered WALs, want 2", len(recovered))
-	}
-
-	if recovered[0].ID != 1 {
-		t.Errorf("recovered[0].ID = %d, want 1", recovered[0].ID)
-	}
-	if recovered[1].ID != 2 {
-		t.Errorf("recovered[1].ID = %d, want 2", recovered[1].ID)
-	}
-
-	if len(recovered[0].Entries) != 1 {
-		t.Errorf("WAL 1: %d entries, want 1", len(recovered[0].Entries))
-	}
-	if len(recovered[1].Entries) != 0 {
-		t.Errorf("WAL 2: %d entries, want 0 (empty WAL)", len(recovered[1].Entries))
-	}
-}
-
-// ============================================================
-// WAL file lifecycle tests
-// ============================================================
-
-func TestWAL_Remove(t *testing.T) {
-	dir := t.TempDir()
-
-	w, err := Create(dir, 42)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	w.Put([]byte("key"), []byte("val"))
-	w.Close()
-
-	path := w.Path()
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Fatal("WAL file should exist before Remove")
-	}
-
-	if err := w.Remove(); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error("WAL file should not exist after Remove")
-	}
-}
-
-func TestWAL_Path(t *testing.T) {
-	dir := t.TempDir()
-
-	w, err := Create(dir, 7)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	defer w.Close()
-
-	expected := filepath.Join(dir, "000007.wal")
-	if w.Path() != expected {
-		t.Errorf("Path() = %q, want %q", w.Path(), expected)
-	}
-}
-
-func TestWAL_OpenAppend(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create and write first entry
-	w1, err := Create(dir, 1)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	w1.Put([]byte("first"), []byte("1"))
-	w1.Close()
-
-	// Open for append and write second entry
-	w2, err := Open(dir, 1)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	w2.Put([]byte("second"), []byte("2"))
-	w2.Close()
-
-	// Recover should see both entries
-	entries, err := Recover(filepath.Join(dir, walFileName(1)))
-	if err != nil {
-		t.Fatalf("Recover: %v", err)
-	}
-
-	if len(entries) != 2 {
-		t.Fatalf("got %d entries, want 2", len(entries))
-	}
-
-	if string(entries[0].Key) != "first" {
-		t.Errorf("entry 0 key = %q, want %q", entries[0].Key, "first")
-	}
-	if string(entries[1].Key) != "second" {
-		t.Errorf("entry 1 key = %q, want %q", entries[1].Key, "second")
-	}
-}
-
-// ============================================================
-// Edge cases
-// ============================================================
-
-func TestWAL_ManySmallWrites(t *testing.T) {
-	dir := t.TempDir()
+func TestWAL_ManyEntries(t *testing.T) {
+	dir := tempDir(t)
 
 	w, err := Create(dir, 1)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	n := 500
+	n := 1000
 	for i := 0; i < n; i++ {
-		key := []byte{byte(i >> 8), byte(i)}
-		val := []byte{byte(i)}
-		if err := w.Put(key, val); err != nil {
+		key := []byte(fmt.Sprintf("key-%04d", i))
+		val := []byte(fmt.Sprintf("val-%04d", i))
+		if err := w.Put(key, val, uint64(i+1)); err != nil {
 			t.Fatalf("Put %d: %v", i, err)
 		}
 	}
-
 	w.Close()
 
 	entries, err := Recover(w.Path())
@@ -819,30 +437,33 @@ func TestWAL_ManySmallWrites(t *testing.T) {
 	}
 
 	if len(entries) != n {
-		t.Errorf("got %d entries, want %d", len(entries), n)
+		t.Fatalf("recovered %d entries, want %d", len(entries), n)
+	}
+
+	// Verify seq numbers survived
+	for i, e := range entries {
+		if e.Seq != uint64(i+1) {
+			t.Fatalf("entry %d: seq = %d, want %d", i, e.Seq, i+1)
+		}
 	}
 }
 
-func TestWAL_MixedBatchAndSingle(t *testing.T) {
-	dir := t.TempDir()
+func TestWAL_LargeValues(t *testing.T) {
+	dir := tempDir(t)
 
 	w, err := Create(dir, 1)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Single write
-	w.Put([]byte("single1"), []byte("s1"))
+	largeVal := make([]byte, 1<<20)
+	for i := range largeVal {
+		largeVal[i] = byte(i % 256)
+	}
 
-	// Batch write
-	w.WriteEntries([]Entry{
-		{Key: []byte("batch1"), Value: kv.NewValue([]byte("b1"))},
-		{Key: []byte("batch2"), Value: kv.NewValue([]byte("b2"))},
-	})
-
-	// Another single write
-	w.Delete([]byte("del1"))
-
+	if err := w.Put([]byte("big"), largeVal, 1); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
 	w.Close()
 
 	entries, err := Recover(w.Path())
@@ -850,52 +471,41 @@ func TestWAL_MixedBatchAndSingle(t *testing.T) {
 		t.Fatalf("Recover: %v", err)
 	}
 
-	if len(entries) != 4 {
-		t.Fatalf("got %d entries, want 4", len(entries))
+	if len(entries) != 1 {
+		t.Fatalf("recovered %d entries, want 1", len(entries))
 	}
 
-	// Verify all present in order
-	keys := make([]string, len(entries))
-	for i, e := range entries {
-		keys[i] = string(e.Key)
+	if len(entries[0].Value.Data) != len(largeVal) {
+		t.Fatalf("value size = %d, want %d", len(entries[0].Value.Data), len(largeVal))
 	}
 
-	expected := []string{"single1", "batch1", "batch2", "del1"}
-	for i, k := range keys {
-		if k != expected[i] {
-			t.Errorf("entry %d: key = %q, want %q", i, k, expected[i])
+	for i := range largeVal {
+		if entries[0].Value.Data[i] != largeVal[i] {
+			t.Fatalf("value mismatch at byte %d", i)
 		}
-	}
-
-	if !entries[3].Value.Tombstone {
-		t.Error("last entry should be tombstone")
 	}
 }
 
-// ============================================================
-// Helpers
-// ============================================================
+// --- helpers ---
 
-func assertEntriesEqual(t *testing.T, got, want []Entry) {
+func assertEntry(t *testing.T, e Entry, seq uint64, key, value string, tombstone bool) {
 	t.Helper()
 
-	if len(got) != len(want) {
-		t.Fatalf("got %d entries, want %d", len(got), len(want))
+	if e.Seq != seq {
+		t.Errorf("seq = %d, want %d", e.Seq, seq)
 	}
 
-	for i := range got {
-		if !bytes.Equal(got[i].Key, want[i].Key) {
-			t.Errorf("entry %d: key = %q, want %q", i, got[i].Key, want[i].Key)
-		}
+	if string(e.Key) != key {
+		t.Errorf("key = %q, want %q", e.Key, key)
+	}
 
-		if got[i].Value.Tombstone != want[i].Value.Tombstone {
-			t.Errorf("entry %d: tombstone = %v, want %v", i, got[i].Value.Tombstone, want[i].Value.Tombstone)
-		}
+	if e.Value.Tombstone != tombstone {
+		t.Errorf("tombstone = %v, want %v", e.Value.Tombstone, tombstone)
+	}
 
-		if !got[i].Value.Tombstone {
-			if !bytes.Equal(got[i].Value.Data, want[i].Value.Data) {
-				t.Errorf("entry %d: value = %q, want %q", i, got[i].Value.Data, want[i].Value.Data)
-			}
+	if !tombstone {
+		if string(e.Value.Data) != value {
+			t.Errorf("value = %q, want %q", e.Value.Data, value)
 		}
 	}
 }
