@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ulixert/lithicdb/itertest"
+	"github.com/ulixert/lithicdb/iterator/itertest"
 )
 
 func TestMemtable_PutAndGet(t *testing.T) {

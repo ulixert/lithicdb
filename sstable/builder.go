@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ulixert/lithicdb/kv"
 )
@@ -274,4 +275,31 @@ func syncDir(dir string) error {
 		_ = d.Close()
 	}()
 	return d.Sync()
+}
+
+// CleanupTempFiles removes any leftover .sst.tmp files in dir.
+// These are incomplete SSTable writes from a previous crash.
+// Call this during engine startup before opening any SSTables.
+func CleanupTempFiles(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("sstable: read dir for cleanup: %w", err)
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".sst.tmp") {
+			path := filepath.Join(dir, e.Name())
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("sstable: remove temp file %s: %w", path, err)
+			}
+		}
+	}
+
+	return nil
 }
