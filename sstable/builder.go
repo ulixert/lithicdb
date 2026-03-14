@@ -30,17 +30,12 @@ type Builder struct {
 
 	block    *BlockBuilder
 	metas    []blockMeta
-	keys     [][]byte // all keys, for bloom filter (see note below)
+	hashes   []uint32 // bloom filter key hashes (4 bytes each, not full keys)
 	firstKey []byte
-	prevKey  []byte // prev key added, for sorted order validation
+	prevKey  []byte // previous key added, for sorted order validation
 	offset   uint64 // current write offset in the file
 	buf      []byte // accumulated file bytes
 	finished bool
-
-	// NOTE: keys hold a copy of every key for bloom filter construction.
-	// For a 64MB memtable with 16-byte keys, this is ~64MB of copies.
-	// A future optimization is to store only key hashes (4 bytes each)
-	// and build the bloom filter incrementally.
 }
 
 // sstFileName returns the SSTable file name for a given ID.
@@ -87,13 +82,11 @@ func (b *Builder) Add(key []byte, value kv.Value) error {
 		copy(b.firstKey, key)
 	}
 
-	// Copy key for bloom filter and sorted order validation.
-	// keyCopy persists in b.keys, so b.prevKey can reference it
-	// safely - it stays valid until Finish.
-	keyCopy := make([]byte, len(key))
-	copy(keyCopy, key)
-	b.keys = append(b.keys, keyCopy)
-	b.prevKey = keyCopy
+	// Store hash for bloom filter (4 bytes per key instead of full copy)
+	b.hashes = append(b.hashes, BloomHash(key))
+
+	// Track previous key for sorted order validation
+	b.prevKey = append(b.prevKey[:0], key...)
 
 	ok, err := b.block.Add(key, value)
 	if err != nil {
@@ -180,7 +173,7 @@ func (b *Builder) Finish() error {
 	}
 
 	// Build and write bloom filter
-	bloom := BuildBloomFilter(b.keys)
+	bloom := BuildBloomFilter(b.hashes)
 	bloomOffset := b.offset
 	if bloom != nil {
 		b.buf = append(b.buf, bloom...)
