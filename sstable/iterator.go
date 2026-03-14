@@ -62,7 +62,7 @@ func (it *SSTableIterator) loadBlock() {
 	block, err := it.reader.readBlock(it.blockIdx)
 	if err != nil {
 		it.err = err
-		it.block = nil
+		it.invalidate()
 		return
 	}
 
@@ -79,7 +79,7 @@ func (it *SSTableIterator) loadEntry() {
 	key, value, err := it.block.readEntry(it.entryIdx)
 	if err != nil {
 		it.err = err
-		it.block = nil
+		it.invalidate()
 		return
 	}
 
@@ -118,9 +118,7 @@ func (it *SSTableIterator) checkEnd() {
 		return
 	}
 	if bytes.Compare(it.curKey, it.endKey) >= 0 {
-		it.block = nil
-		it.curKey = nil
-		it.curValue = kv.Value{}
+		it.invalidate()
 	}
 }
 
@@ -170,13 +168,17 @@ func (it *SSTableIterator) Err() error {
 }
 
 func (it *SSTableIterator) Close() error {
-	it.block = nil
-	it.curKey = nil
-	it.curValue = kv.Value{}
+	it.invalidate()
 	return nil
 }
 
 // IsTombstone returns true if the current entry is a deletion marker.
 func (it *SSTableIterator) IsTombstone() bool {
 	return it.curValue.Tombstone
+}
+
+func (it *SSTableIterator) invalidate() {
+	it.block = nil
+	it.curKey = nil
+	it.curValue = kv.Value{}
 }
