@@ -226,7 +226,11 @@ func TestIndex_RoundTrip(t *testing.T) {
 		{offset: 100, size: 120, lastKey: []byte("carrot")},
 	}
 
-	encoded := encodeIndex(first, metas)
+	encoded, err := encodeIndex(first, metas)
+	if err != nil {
+		t.Fatalf("decodeIndex() error = %v", err)
+	}
+
 	gotFirst, gotMetas, err := decodeIndex(encoded)
 	if err != nil {
 		t.Fatalf("decodeIndex() error = %v", err)

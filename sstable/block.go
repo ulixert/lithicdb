@@ -17,10 +17,10 @@ import (
 // Entry format:
 //
 //	[key_len: 2][value_len: 2][flag: 1][key][value]
-//	flag: 0 = put, 1 = tombstone (value omitted, value_len = 0)
+//	flag: 0 = put, 1 = tombstone (value_len must be 0, value omitted)
 //
-// The trailing checksum is appended by the SSTable builder and
-// verified by the SSTable reader — not part of the block itself.
+// The block checksum (CRC32) is appended and verified by the SSTable
+// builder/reader, not by the block itself. See builder.go and reader.go.
 
 const (
 	blockKeyLenSize   = 2
@@ -29,6 +29,10 @@ const (
 	blockEntryHeader  = blockKeyLenSize + blockValueLenSize + blockFlagSize // 5
 	blockOffsetSize   = 2
 	blockCountSize    = 2
+
+	maxKeyLen       = 1<<16 - 1 // 65,535, max value of uint16
+	maxValueLen     = 1<<16 - 1 // 65,535, stored as uint16 in block entries
+	maxBlockEntreis = 1<<16 - 1 // 65,535
 )
 
 // BlockBuilder accumulates sorted key-value entries and produces
@@ -213,7 +217,7 @@ func (b *Block) Get(target []byte) (kv.Value, bool, error) {
 
 	for low <= high {
 		mid := low + (high-low)/2
-		key, _, err := b.readEntry(mid)
+		key, value, err := b.readEntry(mid)
 		if err != nil {
 			return kv.Value{}, false, err
 		}
@@ -225,10 +229,6 @@ func (b *Block) Get(target []byte) (kv.Value, bool, error) {
 		case cmp > 0:
 			high = mid - 1
 		default:
-			_, value, err := b.readEntry(mid)
-			if err != nil {
-				return kv.Value{}, false, err
-			}
 			return value, true, nil
 		}
 	}

@@ -16,6 +16,9 @@ import (
 //	[index block bytes]
 //	[footer: 33 bytes]
 //
+// Block checksums are appended during SSTable construction (builder.go)
+// and verified on read (reader.go). The block itself (block.go) does
+// not know about its checksum.
 // Footer layout (fixed 33 bytes):
 //
 //	[bloom_offset:  8]
@@ -36,8 +39,8 @@ import (
 //	[last_key_len: 2][last_key][block_offset: 8][block_size: 4]
 
 const (
-	defaultBlockSize = 4096
-	checksumSize     = 4
+	defaultBlockSize  = 4096
+	blockChecksumSize = 4
 
 	footerSize = 33
 	magicValue = uint32(0x4C544442) // "LTDB"
@@ -56,7 +59,7 @@ var (
 	ErrInvalidChecksum = errors.New("sstable: checksum mismatch")
 	ErrInvalidVersion  = errors.New("sstable: unsupported version")
 	ErrEmptySSTable    = errors.New("sstable: cannot build empty SSTable")
-	ErrKeyNotFound     = errors.New("sstable: key not found")
+	ErrCorruptIndex    = errors.New("sstable: corrupt index block")
 )
 
 // footer holds the metadata stored at the end of every SSTable file.
@@ -94,7 +97,7 @@ func decodeFooter(data []byte) (footer, error) {
 	d := data[len(data)-footerSize:]
 
 	if m := binary.LittleEndian.Uint32(d[29:]); m != magicValue {
-		return footer{}, ErrInvalidMagic
+		return footer{}, fmt.Errorf("%w: footer", ErrInvalidChecksum)
 	}
 
 	stored := binary.LittleEndian.Uint32(d[25:29])
@@ -112,7 +115,7 @@ func decodeFooter(data []byte) (footer, error) {
 	}
 
 	if f.version != version1 {
-		return footer{}, ErrInvalidVersion
+		return footer{}, fmt.Errorf("%w: %d", ErrInvalidVersion, f.version)
 	}
 
 	return f, nil
@@ -121,11 +124,21 @@ func decodeFooter(data []byte) (footer, error) {
 // blockMeta describes a single data block's position in the SSTable file.
 type blockMeta struct {
 	offset  uint64
-	size    uint32
+	size    uint32 // size of block data (without checksum)
 	lastKey []byte
 }
 
-func encodeIndex(firstKey []byte, metas []blockMeta) []byte {
+func encodeIndex(firstKey []byte, metas []blockMeta) ([]byte, error) {
+	if len(firstKey) > maxKeyLen {
+		return nil, fmt.Errorf("%w: first key too large (%d bytes)", ErrCorruptIndex, len(firstKey))
+	}
+
+	for i, m := range metas {
+		if len(m.lastKey) > maxKeyLen {
+			return nil, fmt.Errorf("%w: last key too large at block %d (%d bytes)", ErrCorruptIndex, i, len(m.lastKey))
+		}
+	}
+
 	// Calculate size: first_key header + entries
 	size := indexKeyLenSize + len(firstKey)
 	for _, m := range metas {
@@ -146,12 +159,12 @@ func encodeIndex(firstKey []byte, metas []blockMeta) []byte {
 		buf = binary.LittleEndian.AppendUint32(buf, m.size)
 	}
 
-	return buf
+	return buf, nil
 }
 
 func decodeIndex(data []byte) (firstKey []byte, metas []blockMeta, err error) {
 	if len(data) < indexKeyLenSize {
-		return nil, nil, fmt.Errorf("sstable: index block too short")
+		return nil, nil, fmt.Errorf("%w: too short", ErrCorruptIndex)
 	}
 
 	offset := 0
@@ -161,7 +174,7 @@ func decodeIndex(data []byte) (firstKey []byte, metas []blockMeta, err error) {
 	offset += indexKeyLenSize
 
 	if offset+fkLen > len(data) {
-		return nil, nil, fmt.Errorf("sstable: index first key truncated")
+		return nil, nil, fmt.Errorf("%w: first key truncated", ErrCorruptIndex)
 	}
 	firstKey = make([]byte, fkLen)
 	copy(firstKey, data[offset:offset+fkLen])
@@ -170,14 +183,14 @@ func decodeIndex(data []byte) (firstKey []byte, metas []blockMeta, err error) {
 	// Block entries
 	for offset < len(data) {
 		if offset+indexKeyLenSize > len(data) {
-			return nil, nil, fmt.Errorf("sstable: index entry truncated")
+			return nil, nil, fmt.Errorf("%w: entry truncated at offset %d", ErrCorruptIndex, offset)
 		}
 
 		lkLen := int(binary.LittleEndian.Uint16(data[offset:]))
 		offset += indexKeyLenSize
 
 		if offset+lkLen+indexOffsetSize+indexBlockSizeSize > len(data) {
-			return nil, nil, fmt.Errorf("sstable: index entry truncated")
+			return nil, nil, fmt.Errorf("%w: entry truncated at offset %d", ErrCorruptIndex, offset)
 		}
 
 		lastKey := make([]byte, lkLen)

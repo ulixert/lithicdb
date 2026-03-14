@@ -110,7 +110,7 @@ type BloomFilter struct {
 }
 
 // DecodeBloomFilter decodes a serialized bloom filter.
-// Returns nil if the data is empty of invalid.
+// Returns nil if the data is empty or invalid.
 func DecodeBloomFilter(data []byte) *BloomFilter {
 	if len(data) < 1 {
 		return nil
