@@ -222,7 +222,7 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 			// Skip this SSTable rather than failing the entire read.
 			// This means corruption in one file doesn't block reads
 			// that could be served from other sources.
-			// TODO: add err logging and metrics for monitoring
+			// TODO: add error logging and metrics for monitoring
 			continue
 		}
 		if found {
@@ -285,6 +285,7 @@ func (db *DB) rotateMemtable() error {
 		return err
 	}
 
+	// Signal flush goroutine (non-blocking)
 	select {
 	case db.flushCh <- struct{}{}:
 	default:
@@ -307,17 +308,24 @@ func (db *DB) flushLoop() {
 	}
 }
 
+// flushImmutables flushes all immutable memtables to SSTables,
+//
+//	the oldest first. Loops until the immutables list is empty, so
+//
+// a single signal on flushCh is enough to drain the entire backlog.
 func (db *DB) flushImmutables() {
 	for {
 		db.mu.RLock()
 		n := len(db.immutables)
 		if n == 0 {
+			db.mu.RUnlock()
 			return
 		}
-		mt := db.immutables[n-1]
+		mt := db.immutables[n-1] // oldest
 		db.mu.RUnlock()
 
 		if err := db.flushMemtable(mt); err != nil {
+			// TODO: log error, retry with backoff, or shut down
 			return
 		}
 	}

@@ -38,6 +38,27 @@ func waitForFlush(t *testing.T, d *DB, expectedL0 int) {
 	}
 }
 
+// waitForAllFlushes waits until all immutable memtables have been
+// flushed (immutables list is empty).
+func waitForAllFlushes(t *testing.T, d *DB) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		d.mu.RLock()
+		n := len(d.immutables)
+		d.mu.RUnlock()
+		if n == 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for all flushes: %d immutables remaining", n)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 // collectUserKeys reads an iterator and returns user keys in order.
 func collectUserKeys(t *testing.T, iter iterator.Iterator) []string {
 	t.Helper()
@@ -464,7 +485,8 @@ func TestDB_FlushCreatesSSTableAndDeletesWAL(t *testing.T) {
 		d.Put([]byte(key), []byte("value"))
 	}
 
-	waitForFlush(t, d, 1)
+	// Wait for ALL flushes to complete, not just one
+	waitForAllFlushes(t, d)
 
 	// Check that SSTable files were created
 	entries, err := os.ReadDir(dir)
