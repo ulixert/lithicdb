@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/ulixert/lithicdb/iterator"
 	"github.com/ulixert/lithicdb/kv"
 	"github.com/ulixert/lithicdb/memtable"
 	"github.com/ulixert/lithicdb/sstable"
@@ -125,6 +126,264 @@ func (db *DB) recover() error {
 			return fmt.Errorf("db: reopen active WAL: %w", err)
 		}
 		db.activeWAL = w
+	}
+
+	return nil
+}
+
+func (db *DB) newMemtable() error {
+	id := db.nextMemID.Add(1)
+
+	w, err := wal.Create(db.opts.Dir, id)
+	if err != nil {
+		return fmt.Errorf("db: create WAL: %w", err)
+	}
+
+	db.active = memtable.New(id)
+	db.activeWAL = w
+	return nil
+}
+
+// Put inserts or updates a key-value pair.
+func (db *DB) Put(key, value []byte) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	seq := db.nextSeq.Add(1)
+
+	if err := db.activeWAL.Put(key, value, seq); err != nil {
+		return fmt.Errorf("db: WAL put: %w", err)
+	}
+
+	ikey := kv.MakeInternalKey(key, seq)
+	db.active.Put(ikey, kv.NewValue(value))
+
+	if db.active.ApproximateSize() >= db.opts.MemtableSize {
+		if err := db.rotateMemtable(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Delete marks a key as deleted.
+func (db *DB) Delete(key []byte) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	seq := db.nextSeq.Add(1)
+
+	if err := db.activeWAL.Delete(key, seq); err != nil {
+		return fmt.Errorf("db: WAL delete: %w", err)
+	}
+
+	ikey := kv.MakeInternalKey(key, seq)
+	db.active.Put(ikey, kv.NewTombstone())
+
+	if db.active.ApproximateSize() >= db.opts.MemtableSize {
+		if err := db.rotateMemtable(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Get retrieves the newest visible value for a user key.
+// Returns the value and true if found. If the key has been
+// deleted, returns a tombstone value with found=true.
+func (db *DB) Get(key []byte) (kv.Value, bool) {
+	db.mu.RLock()
+	active := db.active
+	immutables := db.immutables
+	l0 := db.l0
+	db.mu.RUnlock()
+
+	// Check the active memtable
+	if val, found := active.Get(key); found {
+		return val, true
+	}
+
+	// Check immutable memtables (newest first)
+	for _, mt := range immutables {
+		if val, found := mt.Get(key); found {
+			return val, true
+		}
+	}
+
+	// Check L0 SSTables (newest first)
+	for _, sst := range l0 {
+		if !sst.MayContain(key) {
+			continue
+		}
+		val, found, err := sst.Get(key)
+		if err != nil {
+			continue
+		}
+		if found {
+			return val, true
+		}
+	}
+
+	return kv.Value{}, false
+}
+
+// Scan returns an iterator over all entries in sorted key order.
+// Returns internal keys. The caller must call Close().
+func (db *DB) Scan() iterator.Iterator {
+	db.mu.RLock()
+	active := db.active
+	immutables := db.immutables
+	l0 := db.l0
+	db.mu.RUnlock()
+
+	iters := make([]iterator.Iterator, 0, 1+len(immutables)+len(l0))
+	iters = append(iters, active.Scan())
+	for _, mt := range immutables {
+		iters = append(iters, mt.Scan())
+	}
+	for _, sst := range l0 {
+		iters = append(iters, sst.Scan())
+	}
+
+	return iterator.NewMergeIterator(iters)
+}
+
+// ScanRange returns an iterator over entries whose user key is in
+// [start, end). The caller must call Close().
+func (db *DB) ScanRange(start, end []byte) iterator.Iterator {
+	db.mu.RLock()
+	active := db.active
+	immutables := db.immutables
+	l0 := db.l0
+	db.mu.RUnlock()
+
+	iters := make([]iterator.Iterator, 0, 1+len(immutables)+len(l0))
+	iters = append(iters, active.ScanRange(start, end))
+	for _, mt := range immutables {
+		iters = append(iters, mt.ScanRange(start, end))
+	}
+	for _, sst := range l0 {
+		iters = append(iters, sst.ScanRange(start, end))
+	}
+
+	return iterator.NewMergeIterator(iters)
+}
+
+func (db *DB) rotateMemtable() error {
+	db.active.Freeze()
+	_ = db.activeWAL.Close()
+
+	db.immutables = append([]*memtable.Memtable{db.active}, db.immutables...)
+
+	if err := db.newMemtable(); err != nil {
+		return err
+	}
+
+	select {
+	case db.flushCh <- struct{}{}:
+	default:
+	}
+
+	return nil
+}
+
+func (db *DB) flushLoop() {
+	defer db.wg.Done()
+
+	for {
+		select {
+		case <-db.flushCh:
+			db.flushImmutables()
+		case <-db.closeCh:
+			db.flushImmutables()
+			return
+		}
+	}
+}
+
+func (db *DB) flushImmutables() {
+	for {
+		db.mu.RLock()
+		n := len(db.immutables)
+		db.mu.RUnlock()
+
+		if n == 0 {
+			return
+		}
+
+		db.mu.RLock()
+		mt := db.immutables[n-1]
+		db.mu.RUnlock()
+
+		if err := db.flushMemtable(mt); err != nil {
+			return
+		}
+	}
+}
+
+func (db *DB) flushMemtable(mt *memtable.Memtable) error {
+	id := mt.ID()
+
+	builder := sstable.NewBuilder(db.opts.Dir, id, db.opts.BlockSize)
+
+	iter := mt.Scan()
+	defer iter.Close()
+
+	for iter.IsValid() {
+		// Iterator returns internal keys and raw values.
+		// Reconstruct kv.Value from the iterator output.
+		key := iter.Key()
+		val := iter.Value()
+
+		var value kv.Value
+		if val == nil {
+			value = kv.NewTombstone()
+		} else {
+			value = kv.NewValue(val)
+		}
+
+		if err := builder.Add(key, value); err != nil {
+			return fmt.Errorf("db: flush add: %w", err)
+		}
+
+		iter.Next()
+	}
+
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("db: flush iterate: %w", err)
+	}
+
+	if err := builder.Finish(); err != nil {
+		return fmt.Errorf("db: flush finish: %w", err)
+	}
+
+	reader, err := sstable.OpenReader(db.opts.Dir, id)
+	if err != nil {
+		return fmt.Errorf("db: open flushed SSTable: %w", err)
+	}
+
+	db.mu.Lock()
+	db.l0 = append([]*sstable.Reader{reader}, db.l0...)
+	db.immutables = db.immutables[:len(db.immutables)-1]
+	db.mu.Unlock()
+
+	wal.RemoveByID(db.opts.Dir, id)
+
+	return nil
+}
+
+// Close gracefully shuts down the engine.
+func (db *DB) Close() error {
+	close(db.closeCh)
+	db.wg.Wait()
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	if db.activeWAL != nil {
+		_ = db.activeWAL.Close()
 	}
 
 	return nil
