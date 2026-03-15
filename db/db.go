@@ -219,6 +219,10 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 		}
 		val, found, err := sst.Get(key)
 		if err != nil {
+			// Skip this SSTable rather than failing the entire read.
+			// This means corruption in one file doesn't block reads
+			// that could be served from other sources.
+			// TODO: add err logging and metrics for monitoring
 			continue
 		}
 		if found {

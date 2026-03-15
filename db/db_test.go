@@ -2,6 +2,8 @@ package db
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -442,5 +444,141 @@ func TestDB_ScanWithTombstones(t *testing.T) {
 
 	if !iter.IsValid() || string(kv.UserKey(iter.Key())) != "c" {
 		t.Fatalf("expected 'c', got %q", kv.UserKey(iter.Key()))
+	}
+}
+
+func TestDB_FlushCreatesSSTableAndDeletesWAL(t *testing.T) {
+	dir := t.TempDir()
+	opts := testOpts(dir)
+	opts.MemtableSize = 128
+
+	d, err := Open(opts)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+
+	// Write enough to trigger at least one flush
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("key-%04d", i)
+		d.Put([]byte(key), []byte("value"))
+	}
+
+	waitForFlush(t, d, 1)
+
+	// Check that SSTable files were created
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	var sstCount, walCount int
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sst") {
+			sstCount++
+		}
+		if strings.HasSuffix(e.Name(), ".wal") {
+			walCount++
+		}
+	}
+
+	if sstCount == 0 {
+		t.Error("expected at least one .sst file after flush")
+	}
+
+	// There should be exactly one WAL remaining — the active memtable's.
+	// Flushed memtables' WALs should be deleted.
+	if walCount != 1 {
+		t.Errorf("expected 1 WAL (active memtable), got %d", walCount)
+	}
+}
+
+func TestDB_FlushThenScanMergesCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	opts := testOpts(dir)
+	opts.MemtableSize = 128
+
+	d, err := Open(opts)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+
+	// Write keys 0-49, triggering flush(es)
+	for i := 0; i < 50; i++ {
+		d.Put([]byte(fmt.Sprintf("key-%04d", i)), []byte(fmt.Sprintf("v1-%04d", i)))
+	}
+
+	waitForFlush(t, d, 1)
+
+	// Overwrite some keys in the active memtable
+	for i := 0; i < 10; i++ {
+		d.Put([]byte(fmt.Sprintf("key-%04d", i)), []byte(fmt.Sprintf("v2-%04d", i)))
+	}
+
+	// Scan should merge SSTable + memtable, showing v2 for keys 0-9
+	iter := d.Scan()
+	defer iter.Close()
+
+	for iter.IsValid() {
+		userKey := string(kv.UserKey(iter.Key()))
+		val := string(iter.Value())
+
+		// Extract index from key
+		var idx int
+		fmt.Sscanf(userKey, "key-%04d", &idx)
+
+		if idx < 10 {
+			expected := fmt.Sprintf("v2-%04d", idx)
+			if val != expected {
+				t.Errorf("key %q: value = %q, want %q (overwritten)", userKey, val, expected)
+			}
+		} else if idx < 50 {
+			expected := fmt.Sprintf("v1-%04d", idx)
+			if val != expected {
+				t.Errorf("key %q: value = %q, want %q (original)", userKey, val, expected)
+			}
+		}
+
+		iter.Next()
+	}
+}
+
+func TestDB_RecoveryAfterFlush(t *testing.T) {
+	dir := t.TempDir()
+	opts := testOpts(dir)
+	opts.MemtableSize = 128
+
+	d, err := Open(opts)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Write enough to trigger flush
+	for i := 0; i < 50; i++ {
+		d.Put([]byte(fmt.Sprintf("key-%04d", i)), []byte("value"))
+	}
+	waitForFlush(t, d, 1)
+
+	// Write a few more into the active memtable (unflushed)
+	d.Put([]byte("after-flush"), []byte("yes"))
+	d.Close()
+
+	// Reopen — should recover the unflushed write from WAL.
+	// Note: flushed data is NOT recoverable yet without a manifest
+	// (Phase 2). This test verifies WAL recovery still works after
+	// flushes have occurred.
+	d2, err := Open(opts)
+	if err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+	defer d2.Close()
+
+	val, found := d2.Get([]byte("after-flush"))
+	if !found {
+		t.Fatal("expected 'after-flush' to be recoverable from WAL")
+	}
+	if string(val.Data) != "yes" {
+		t.Errorf("value = %q, want %q", val.Data, "yes")
 	}
 }

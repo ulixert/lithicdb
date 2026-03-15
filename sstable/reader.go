@@ -99,10 +99,12 @@ func (r *Reader) NumBlocks() int {
 	return len(r.metas)
 }
 
-// MayContain checks the bloom filter for the given key.
+// MayContain checks the bloom filter for the given user key.
 // Returns true if the key might be present, false if definitely absent.
-func (r *Reader) MayContain(key []byte) bool {
-	return BloomMayContain(r.bloom, key)
+// The argument must be a user key, not an internal key, because
+// the bloom filter is built from user key hashes.
+func (r *Reader) MayContain(userKey []byte) bool {
+	return BloomMayContain(r.bloom, userKey)
 }
 
 // readBlock reads and verifies the data block at the given index.
@@ -194,18 +196,26 @@ func (r *Reader) Scan() *SSTableIterator {
 	return newSSTableIterator(r, 0, nil, nil)
 }
 
-// ScanRange returns an iterator over entries in [start, end).
-// If start is nil, the scan begins from the first key.
+// ScanRange returns an iterator over entries whose user key is in
+// [start, end). If start is nil, the scan begins from the first key.
 // If end is nil, the scan continues through the last key.
+// Bounds are user keys, not internal keys.
 func (r *Reader) ScanRange(start, end []byte) *SSTableIterator {
 	startBlock := 0
+	var startIKey []byte
 	if start != nil {
-		startBlock = r.findBlock(start)
+		startIKey = kv.MakeSearchKey(start)
+		startBlock = r.findBlock(startIKey)
 		if startBlock < 0 {
 			// start is past all keys - empty iterator
 			return newSSTableIterator(r, len(r.metas), nil, nil)
 		}
 	}
 
-	return newSSTableIterator(r, startBlock, start, end)
+	var endIKey []byte
+	if end != nil {
+		endIKey = kv.MakeSearchKey(end)
+	}
+
+	return newSSTableIterator(r, startBlock, startIKey, endIKey)
 }
