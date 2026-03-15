@@ -311,13 +311,9 @@ func (db *DB) flushImmutables() {
 	for {
 		db.mu.RLock()
 		n := len(db.immutables)
-		db.mu.RUnlock()
-
 		if n == 0 {
 			return
 		}
-
-		db.mu.RLock()
 		mt := db.immutables[n-1]
 		db.mu.RUnlock()
 
