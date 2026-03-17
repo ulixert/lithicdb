@@ -30,10 +30,11 @@ const (
 	typeSnapshot       byte = 3
 	typeNextIDs        byte = 4
 
-	idSize     = 8  // uint64 SSTable ID
-	levelSize  = 1  // uint8 level number
-	keyLenSize = 2  // uint16 key length prefix
-	nextIDSize = 16 // two uint64s (nextMemID + nextSeq)
+	idSize            = 8  // uint64 SSTable ID
+	levelSize         = 1  // uint8 level number
+	keyLenSize        = 2  // uint16 key length prefix
+	nextIDSize        = 16 // two uint64s (nextMemID + nextSeq)
+	snapshotCountSize = 4  // uint32 entry count
 )
 
 var (
@@ -202,4 +203,116 @@ func decodeSSTableAdded(data []byte) (SSTableInfo, error) {
 		FirstKey: firstKey,
 		LastKey:  lastKey,
 	}, nil
+}
+
+// --- SSTableRemoved ---
+
+func encodeSSTableRemoved(info SSTableInfo) []byte {
+	buf := make([]byte, 0, idSize+levelSize)
+	buf = binary.LittleEndian.AppendUint64(buf, info.ID)
+	buf = append(buf, info.Level)
+	return buf
+}
+
+func decodeSSTableRemoved(data []byte) (SSTableInfo, error) {
+	if len(data) < idSize+levelSize {
+		return SSTableInfo{}, ErrShortRecord
+	}
+	return SSTableInfo{
+		ID:    binary.LittleEndian.Uint64(data[:idSize]),
+		Level: data[idSize],
+	}, nil
+}
+
+// --- Snapshot ---
+
+func encodeSnapshot(tables []SSTableInfo) []byte {
+	size := snapshotCountSize // count
+	for _, t := range tables {
+		size += idSize + levelSize + keyLenSize + len(t.FirstKey) + keyLenSize + len(t.LastKey)
+	}
+
+	buf := make([]byte, 0, size)
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(tables)))
+
+	for _, t := range tables {
+		buf = binary.LittleEndian.AppendUint64(buf, t.ID)
+		buf = append(buf, t.Level)
+		buf = binary.LittleEndian.AppendUint16(buf, uint16(len(t.FirstKey)))
+		buf = append(buf, t.FirstKey...)
+		buf = binary.LittleEndian.AppendUint16(buf, uint16(len(t.LastKey)))
+		buf = append(buf, t.LastKey...)
+	}
+
+	return buf
+}
+
+func decodeSnapshot(data []byte) ([]SSTableInfo, error) {
+	if len(data) < snapshotCountSize {
+		return nil, ErrShortRecord
+	}
+
+	count := int(binary.LittleEndian.Uint32(data[:snapshotCountSize]))
+	offset := snapshotCountSize
+
+	tables := make([]SSTableInfo, count)
+	for i := 0; i < count; i++ {
+		if offset+idSize+levelSize+keyLenSize > len(data) {
+			return nil, ErrShortRecord
+		}
+
+		id := binary.LittleEndian.Uint64(data[offset:])
+		offset += idSize
+
+		level := data[offset]
+		offset += levelSize
+
+		fkLen := int(binary.LittleEndian.Uint16(data[offset:]))
+		offset += keyLenSize
+		if offset+fkLen > len(data) {
+			return nil, ErrShortRecord
+		}
+		firstKey := make([]byte, fkLen)
+		copy(firstKey, data[offset:offset+fkLen])
+		offset += fkLen
+
+		if offset+keyLenSize > len(data) {
+			return nil, ErrShortRecord
+		}
+		lkLen := int(binary.LittleEndian.Uint16(data[offset:]))
+		offset += keyLenSize
+		if offset+lkLen > len(data) {
+			return nil, ErrShortRecord
+		}
+		lastKey := make([]byte, lkLen)
+		copy(lastKey, data[offset:offset+lkLen])
+		offset += lkLen
+
+		tables[i] = SSTableInfo{
+			ID:       id,
+			Level:    level,
+			FirstKey: firstKey,
+			LastKey:  lastKey,
+		}
+	}
+
+	return tables, nil
+}
+
+// --- NextIDs ---
+
+func encodeNextIDs(nextMemID, nextSeq uint64) []byte {
+	buf := make([]byte, nextIDSize)
+	binary.LittleEndian.PutUint64(buf[:8], nextMemID)
+	binary.LittleEndian.PutUint64(buf[8:], nextSeq)
+	return buf
+}
+
+func decodeNextIDs(data []byte) (nextMemID, nextSeq uint64, err error) {
+	if len(data) < nextIDSize {
+		return 0, 0, ErrShortRecord
+	}
+	return binary.LittleEndian.Uint64(data[:8]),
+		binary.LittleEndian.Uint64(data[8:]),
+		nil
 }
