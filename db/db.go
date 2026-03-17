@@ -7,6 +7,7 @@ import (
 
 	"github.com/ulixert/lithicdb/iterator"
 	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/lithicdb/manifest"
 	"github.com/ulixert/lithicdb/memtable"
 	"github.com/ulixert/lithicdb/sstable"
 	"github.com/ulixert/lithicdb/wal"
@@ -43,6 +44,7 @@ type DB struct {
 	immutables []*memtable.Memtable // frozen, newest first
 	l0         []*sstable.Reader    // L0 SSTables, newest first
 
+	manifest  *manifest.Manifest
 	nextMemID atomic.Uint64
 	nextSeq   atomic.Uint64 // global monotonic sequence number
 
@@ -83,15 +85,52 @@ func Open(opts Options) (*DB, error) {
 	return db, nil
 }
 
-// recover replays WAL files to rebuild the memtable state.
+// recover restores the DB state from the manifest and WAL files.
+//
+// Recovery order:
+// 1. Open manifest (or create if first startup) -> get SSTable list + IDs
+// 2. Open all SSTables listed in the manifest
+// 3. Replay WAL files -> rebuild unflushed memtable state
+// 4. Reconcile: max(manifest IDs, WAL IDs) -> set nextMemID, nextSeq
 func (db *DB) recover() error {
-	recovered, err := wal.RecoverDir(db.opts.Dir)
-	if err != nil {
-		return err
+	var state *manifest.State
+
+	if manifest.Exists(db.opts.Dir) {
+		m, s, err := manifest.Open(db.opts.Dir)
+		if err != nil {
+			return fmt.Errorf("open manifest: %w", err)
+		}
+		db.manifest = m
+		state = s
+	} else {
+		m, err := manifest.Create(db.opts.Dir, 0, 0)
+		if err != nil {
+			return fmt.Errorf("create manifest: %w", err)
+		}
+		db.manifest = m
+		state = &manifest.State{}
 	}
 
-	var maxMemID uint64
-	var maxSeq uint64
+	// Restore ID counters from manifest
+	db.nextMemID.Store(state.NextMemID)
+	db.nextSeq.Store(state.NextSeq)
+
+	// Open all L0 SSTables listed in the manifest
+	for _, info := range state.L0 {
+		reader, err := sstable.OpenReader(db.opts.Dir, info.ID)
+		if err != nil {
+			return fmt.Errorf("open SSTable %d: %w", info.ID, err)
+		}
+		db.l0 = append(db.l0, reader)
+	}
+
+	// TODO: open L1+ SSTables when leveled compaction is implemented
+
+	// Replay WAL files for unflushed memtable data
+	recovered, err := wal.RecoverDir(db.opts.Dir)
+	if err != nil {
+		return fmt.Errorf("recover WALs: %w", err)
+	}
 
 	for _, rw := range recovered {
 		mt := memtable.New(rw.ID)
@@ -100,13 +139,16 @@ func (db *DB) recover() error {
 			ikey := kv.MakeInternalKey(e.Key, e.Seq)
 			mt.Put(ikey, e.Value)
 
-			if e.Seq > maxSeq {
-				maxSeq = e.Seq
+			// Track max seq seen in WAL (may exceed manifest's nextSeq
+			// if a write happened after the last manifest update)
+			if e.Seq >= db.nextSeq.Load() {
+				db.nextSeq.Store(e.Seq)
 			}
 		}
 
-		if rw.ID > maxMemID {
-			maxMemID = rw.ID
+		// Track max memtable ID from WAL
+		if rw.ID >= db.nextMemID.Load() {
+			db.nextMemID.Store(rw.ID)
 		}
 
 		if db.active != nil {
@@ -116,10 +158,7 @@ func (db *DB) recover() error {
 		db.active = mt
 	}
 
-	db.nextMemID.Store(maxMemID)
-	db.nextSeq.Store(maxSeq)
-
-	// Re-open the active WAL for appending
+	// Reopen the active WAL for appending
 	if db.active != nil {
 		w, err := wal.Open(db.opts.Dir, db.active.ID())
 		if err != nil {
@@ -372,11 +411,33 @@ func (db *DB) flushMemtable(mt *memtable.Memtable) error {
 		return fmt.Errorf("db: open flushed SSTable: %w", err)
 	}
 
+	// Record the new SSTable in the manifest BEFORE updating the in-memory
+	// state. If we crash after the manifest write but before updating
+	// memory, recovery will see the SSTable and load it.
+	if err := db.manifest.AddSSTable(manifest.SSTableInfo{
+		ID:       id,
+		Level:    0,
+		FirstKey: reader.FirstKey(),
+		LastKey:  reader.LastKey(),
+	}); err != nil {
+		return fmt.Errorf("db: manifest add: %w", err)
+	}
+
+	// Update next IDs in the manifest so they survive WAL deletion
+	if err := db.manifest.UpdateNextIDs(
+		db.nextMemID.Load(),
+		db.nextSeq.Load(),
+	); err != nil {
+		return fmt.Errorf("db: manifest update IDs: %w", err)
+	}
+
+	// Now update in-memory state
 	db.mu.Lock()
 	db.l0 = append([]*sstable.Reader{reader}, db.l0...)
 	db.immutables = db.immutables[:len(db.immutables)-1]
 	db.mu.Unlock()
 
+	// Delete WAL - data is now durable in the SSTable and manifest
 	wal.RemoveByID(db.opts.Dir, id)
 
 	return nil
@@ -392,6 +453,15 @@ func (db *DB) Close() error {
 
 	if db.activeWAL != nil {
 		_ = db.activeWAL.Close()
+	}
+
+	if db.manifest != nil {
+		// Write final IDs before closing
+		_ = db.manifest.UpdateNextIDs(
+			db.nextMemID.Load(),
+			db.nextSeq.Load(),
+		)
+		_ = db.manifest.Close()
 	}
 
 	return nil

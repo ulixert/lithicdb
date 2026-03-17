@@ -586,21 +586,70 @@ func TestDB_RecoveryAfterFlush(t *testing.T) {
 	d.Put([]byte("after-flush"), []byte("yes"))
 	d.Close()
 
-	// Reopen — should recover the unflushed write from WAL.
-	// Note: flushed data is NOT recoverable yet without a manifest
-	// (Phase 2). This test verifies WAL recovery still works after
-	// flushes have occurred.
+	// Reopen — flushed data should be recovered from manifest + SSTables,
+	// unflushed data from WAL replay.
 	d2, err := Open(opts)
 	if err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
 	defer d2.Close()
 
+	// Unflushed write recovered from WAL
 	val, found := d2.Get([]byte("after-flush"))
 	if !found {
 		t.Fatal("expected 'after-flush' to be recoverable from WAL")
 	}
 	if string(val.Data) != "yes" {
 		t.Errorf("value = %q, want %q", val.Data, "yes")
+	}
+
+	// Flushed writes recovered from manifest + SSTable files
+	for i := 0; i < 50; i++ {
+		key := fmt.Sprintf("key-%04d", i)
+		val, found := d2.Get([]byte(key))
+		if !found {
+			t.Fatalf("key %q not found after recovery (should be in SSTable)", key)
+		}
+		if string(val.Data) != "value" {
+			t.Errorf("Get(%q) = %q, want %q", key, val.Data, "value")
+		}
+	}
+}
+
+func TestDB_RecoveryPreservesSeqAfterFlush(t *testing.T) {
+	dir := t.TempDir()
+	opts := testOpts(dir)
+	opts.MemtableSize = 128
+
+	d, err := Open(opts)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Write and flush — this deletes the WAL
+	for i := 0; i < 50; i++ {
+		d.Put([]byte(fmt.Sprintf("key-%04d", i)), []byte("v1"))
+	}
+	waitForAllFlushes(t, d)
+	d.Close()
+
+	// Reopen — nextSeq should come from manifest, not WAL
+	// (WALs were deleted after flush)
+	d2, err := Open(opts)
+	if err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+	defer d2.Close()
+
+	// New writes should get sequence numbers higher than anything
+	// in the SSTables, so overwrites work correctly
+	d2.Put([]byte("key-0000"), []byte("v2"))
+
+	val, found := d2.Get([]byte("key-0000"))
+	if !found {
+		t.Fatal("expected found")
+	}
+	if string(val.Data) != "v2" {
+		t.Errorf("value = %q, want %q (new write should win over SSTable)", val.Data, "v2")
 	}
 }

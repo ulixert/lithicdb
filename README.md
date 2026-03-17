@@ -142,7 +142,7 @@ Get misses are faster than hits because the bloom filter rejects absent keys wit
 - [x] Tombstone support with explicit typed flags
 
 ### Compaction & Persistence
-- [ ] Manifest file (source of truth for SSTable state, checksummed, periodic snapshots)
+- [x] Manifest file (source of truth for SSTable state, checksummed, periodic snapshots)
 - [ ] Leveled compaction (L0 → L1 → L2, 10x size ratio, background worker)
 - [ ] Reference-counted SSTables (safe deletion while iterators are active)
 - [ ] Block cache (sharded LRU for decoded blocks)
@@ -176,6 +176,7 @@ lithicdb/
   db/              engine: Put, Get, Delete, Scan, flush, recovery
   iterator/        Iterator interface, MergeIterator
   kv/              Value type, internal key encoding (user_key + seq)
+  manifest/        LSM state persistence: SSTable tracking, ID counters
   memtable/        skip list (from scratch), thread-safe wrapper
   sstable/         block encoding, bloom filter, SSTable builder/reader
   wal/             write-ahead log: encoding, writing, crash recovery
