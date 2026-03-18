@@ -68,3 +68,70 @@ func NewBlockCache(capacity int64) *BlockCache {
 		capacity:  capacity,
 	}
 }
+
+// Get retrieves a block from the cache. Returns nil if not present.
+func (c *BlockCache) Get(key BlockCacheKey) *Block {
+	shard := c.getShard(key)
+
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	elem, ok := shard.items[key]
+	if !ok {
+		return nil
+	}
+
+	// Move to the front (most recently used)
+	shard.order.MoveToFront(elem)
+	return elem.Value.(*cacheEntry).block
+}
+
+// Put inserts a block into the cache. If the cache is full, the
+// least recently used entries are evicted to make room.
+func (c *BlockCache) Put(key BlockCacheKey, block *Block, size int64) {
+	shard := c.getShard(key)
+
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	// If already present, update and move to the front
+	if elem, ok := shard.items[key]; ok {
+		old := elem.Value.(*cacheEntry)
+		shard.size -= old.size
+		old.block = block
+		old.size = size
+		shard.size += size
+		shard.order.MoveToFront(elem)
+		return
+	}
+
+	// Evict until there's room
+	for shard.size+size > shard.capacity && shard.order.Len() > 0 {
+		shard.evict()
+	}
+
+	entry := &cacheEntry{key: key, block: block, size: size}
+	elem := shard.order.PushFront(entry)
+	shard.items[key] = elem
+	shard.size += size
+}
+
+func (s *cacheShard) evict() {
+	back := s.order.Back()
+	if back == nil {
+		return
+	}
+
+	entry := back.Value.(*cacheEntry)
+	delete(s.items, entry.key)
+	s.order.Remove(back)
+	s.size -= entry.size
+}
+
+// getShard returns the shard for a given key using a fast hash.
+func (c *BlockCache) getShard(key BlockCacheKey) *cacheShard {
+	// Mix both fields into a single hash. The multiply-xor-shift
+	// is a standard fast hash for integer keys.
+	h := key.SSTID*0x9E3779B97F4A7C15 ^ key.BlockOffset*0x517CC1B727220A95
+	return c.shards[h%c.numShards]
+}
