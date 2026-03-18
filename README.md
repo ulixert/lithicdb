@@ -143,8 +143,8 @@ Get misses are faster than hits because the bloom filter rejects absent keys wit
 
 ### Compaction & Persistence
 - [x] Manifest file (source of truth for SSTable state, checksummed, periodic snapshots)
-- [ ] Leveled compaction (L0 → L1 → L2, 10x size ratio, background worker)
-- [ ] Reference-counted SSTables (safe deletion while iterators are active)
+- [x] Leveled compaction (L0 → L1 → L2, 10x size ratio, background worker)
+- [x] Reference-counted SSTables (safe deletion while iterators are active)
 - [ ] Block cache (sharded LRU for decoded blocks)
 - [ ] Write batch API (atomic multi-key writes)
 - [ ] Write backpressure (block when flush can't keep up)
