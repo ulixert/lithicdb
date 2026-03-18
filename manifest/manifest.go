@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 )
 
 const manifestFileName = "MANIFEST"
@@ -22,6 +23,7 @@ const manifestFileName = "MANIFEST"
 // disk but is not in the manifest, it's garbage from a failed
 // operation and should be deleted.
 type Manifest struct {
+	mu   sync.Mutex
 	file *os.File
 	dir  string
 
@@ -205,6 +207,9 @@ func (m *Manifest) buildState() *State {
 
 // AddSSTable records that a new SSTable has been added.
 func (m *Manifest) AddSSTable(info SSTableInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if err := m.writeRecord(Record{
 		Type:    typeSSTableAdded,
 		SSTable: info,
@@ -217,6 +222,9 @@ func (m *Manifest) AddSSTable(info SSTableInfo) error {
 
 // RemoveSSTable records that an SSTable has been removed.
 func (m *Manifest) RemoveSSTable(id uint64, level uint8) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if err := m.writeRecord(Record{
 		Type:    typeSSTableRemoved,
 		SSTable: SSTableInfo{ID: id, Level: level},
@@ -230,6 +238,9 @@ func (m *Manifest) RemoveSSTable(id uint64, level uint8) error {
 // UpdateNextIDs records the latest ID counters.
 // Called after a flush or any operation that advances the counters.
 func (m *Manifest) UpdateNextIDs(nextMemID, nextSeq uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.nextMemID = nextMemID
 	m.nextSeq = nextSeq
 	return m.writeRecord(Record{
@@ -292,8 +303,13 @@ func (m *Manifest) maybeSnapshot() error {
 
 // Close closes the manifest file.
 func (m *Manifest) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.file == nil {
 		return nil
 	}
-	return m.file.Close()
+	err := m.file.Close()
+	m.file = nil
+	return err
 }
