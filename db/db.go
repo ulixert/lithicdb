@@ -272,7 +272,7 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 	active := db.active
 	immutables := db.immutables
 	l0 := db.l0
-	levels := db.levels
+	levels := db.snapshotLevels()
 	db.mu.RUnlock()
 
 	// Active memtable
@@ -337,7 +337,7 @@ func (db *DB) Scan() iterator.Iterator {
 	active := db.active
 	immutables := db.immutables
 	l0 := db.l0
-	levels := db.levels
+	levels := db.snapshotLevels()
 	db.mu.RUnlock()
 
 	iters := make([]iterator.Iterator, 0, 1+len(immutables)+len(l0)+len(levels))
@@ -349,7 +349,7 @@ func (db *DB) Scan() iterator.Iterator {
 	for _, h := range l0 {
 		iters = append(iters, h.Reader.Scan())
 	}
-	for _, level := range levels {
+	for _, level := range levels[1:] {
 		for _, h := range level {
 			iters = append(iters, h.Reader.Scan())
 		}
@@ -365,7 +365,7 @@ func (db *DB) ScanRange(start, end []byte) iterator.Iterator {
 	active := db.active
 	immutables := db.immutables
 	l0 := db.l0
-	levels := db.levels
+	levels := db.snapshotLevels()
 	db.mu.RUnlock()
 
 	iters := make([]iterator.Iterator, 0, 1+len(immutables)+len(l0)+len(levels))
@@ -377,13 +377,25 @@ func (db *DB) ScanRange(start, end []byte) iterator.Iterator {
 	for _, h := range l0 {
 		iters = append(iters, h.Reader.ScanRange(start, end))
 	}
-	for _, level := range levels {
+	for _, level := range levels[1:] {
 		for _, h := range level {
 			iters = append(iters, h.Reader.ScanRange(start, end))
 		}
 	}
 
 	return iterator.NewMergeIterator(iters)
+}
+
+// snapshotLevels returns a shallow copy of the levels slice where
+// each inner slice header is independent. This prevents a race where
+// compaction replaces db.levels[n] while a reader iterates the old copy.
+// Must be called with mu.RLock held.
+func (db *DB) snapshotLevels() [][]*sstable.TableHandle {
+	cp := make([][]*sstable.TableHandle, len(db.levels))
+	for i, level := range db.levels {
+		cp[i] = level // copies the inner slice header, not the elements
+	}
+	return cp
 }
 
 func (db *DB) rotateMemtable() error {
