@@ -26,7 +26,7 @@ type Manifest struct {
 	dir  string
 
 	// Current state, rebuilt during recovery and maintained on writes.
-	tables    map[uint64]SSTableInfo // id -> info
+	tables    map[uint64]SSTableInfo // id → info
 	nextMemID uint64
 	nextSeq   uint64
 
@@ -44,8 +44,10 @@ type State struct {
 	L0 []SSTableInfo
 
 	// Levels contain SSTables at level 1+, indexed by level.
+	// Levels[0] is nil (L0 is stored separately in the L0 field).
+	// Levels[1] = L1, Levels[2] = L2, etc. Index matches level number.
 	// Within each level, SSTables are sorted by the first key.
-	Levels map[uint8][]SSTableInfo
+	Levels [][]SSTableInfo
 
 	NextMemID uint64
 	NextSeq   uint64
@@ -157,9 +159,21 @@ func (m *Manifest) applyRecord(r Record) {
 // buildState constructs a State from the current in-memory tables.
 func (m *Manifest) buildState() *State {
 	s := &State{
-		Levels:    make(map[uint8][]SSTableInfo),
 		NextMemID: m.nextMemID,
 		NextSeq:   m.nextSeq,
+	}
+
+	// Find the maximum level to size the slice
+	maxLevel := uint8(0)
+	for _, t := range m.tables {
+		if t.Level > maxLevel {
+			maxLevel = t.Level
+		}
+	}
+
+	if maxLevel > 0 {
+		// index = level number, s.Levels[0] = nil
+		s.Levels = make([][]SSTableInfo, maxLevel+1)
 	}
 
 	for _, t := range m.tables {
@@ -177,6 +191,9 @@ func (m *Manifest) buildState() *State {
 
 	// L1+: sort by the first key ascending within each level
 	for level, tables := range s.Levels {
+		if len(tables) == 0 {
+			continue
+		}
 		sort.Slice(tables, func(i, j int) bool {
 			return bytes.Compare(tables[i].FirstKey, tables[j].FirstKey) < 0
 		})

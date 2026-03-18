@@ -40,6 +40,7 @@ func DefaultOptions(dir string) Options {
 //   - Writes acquire mu (exclusive) briefly to write WAL + memtable
 //   - Reads acquire mu (shared) to snapshot state, then release it
 //   - Flush runs in the background, acquire mu briefly to swap state
+//   - Compaction runs in the background and acquires mu briefly to swap old tables for new ones.
 type DB struct {
 	opts Options
 
@@ -86,10 +87,8 @@ func Open(opts Options) (*DB, error) {
 		closeCh:   make(chan struct{}),
 	}
 
-	// Ensure levels slice has enough capacity
-	if opts.Compaction.MaxLevels > 1 {
-		db.levels = make([][]*sstable.TableHandle, opts.Compaction.MaxLevels-1)
-	}
+	// levels[0] = nil (L0 stored separately), levels[1] = L1, etc.
+	db.levels = make([][]*sstable.TableHandle, opts.Compaction.MaxLevels)
 
 	if err := db.recover(); err != nil {
 		return nil, fmt.Errorf("db: recovery: %w", err)
@@ -148,17 +147,17 @@ func (db *DB) recover() error {
 	}
 
 	// Open L1+ SSTables
+	// state.Levels and db.levels use the same indexing: index = level number
 	for level, tables := range state.Levels {
-		levelIdx := int(level) - 1 // state.Levels is keyed by level number, db.levels is 0-indexed (L1=0)
-		if levelIdx < 0 || levelIdx >= len(db.levels) {
-			return fmt.Errorf("manifest contains L%d SSTables but DB is configured for only %d levels", level, len(db.levels)+1)
+		if level == 0 || level >= len(db.levels) {
+			continue
 		}
 		for _, info := range tables {
 			reader, err := sstable.OpenReader(db.opts.Dir, info.ID)
 			if err != nil {
 				return fmt.Errorf("open L%d SSTable %d: %w", level, info.ID, err)
 			}
-			db.levels[levelIdx] = append(db.levels[levelIdx], sstable.NewTableHandle(reader, db.opts.Dir))
+			db.levels[level] = append(db.levels[level], sstable.NewTableHandle(reader, db.opts.Dir))
 		}
 	}
 
@@ -666,23 +665,21 @@ func (db *DB) applyCompactionResult(result *compaction.CompactionResult) error {
 		db.l0 = newL0
 	} else {
 		// Remove compacted files from the input level
-		inputIdx := task.InputLevel - 1
-		if inputIdx < len(db.levels) {
-			newLevel := make([]*sstable.TableHandle, 0, len(db.levels[inputIdx]))
-			for _, h := range db.levels[inputIdx] {
+		if task.InputLevel < len(db.levels) {
+			newLevel := make([]*sstable.TableHandle, 0, len(db.levels[task.InputLevel]))
+			for _, h := range db.levels[task.InputLevel] {
 				if !obsoleteIDs[h.Reader.ID()] {
 					newLevel = append(newLevel, h)
 				}
 			}
-			db.levels[inputIdx] = newLevel
+			db.levels[task.InputLevel] = newLevel
 		}
 	}
 
 	// Remove compacted files from the output level
-	outputIdx := task.OutputLevel - 1
-	if outputIdx >= 0 && outputIdx < len(db.levels) {
-		newLevel := make([]*sstable.TableHandle, 0, len(db.levels[outputIdx]))
-		for _, h := range db.levels[outputIdx] {
+	if task.OutputLevel >= 0 && task.OutputLevel < len(db.levels) {
+		newLevel := make([]*sstable.TableHandle, 0, len(db.levels[task.OutputLevel]))
+		for _, h := range db.levels[task.OutputLevel] {
 			if !obsoleteIDs[h.Reader.ID()] {
 				newLevel = append(newLevel, h)
 			}
@@ -690,7 +687,7 @@ func (db *DB) applyCompactionResult(result *compaction.CompactionResult) error {
 		// Insert new handles (sorted by the first key for L1+)
 		newLevel = append(newLevel, newHandles...)
 		sortHandlesByFirstKey(newLevel)
-		db.levels[outputIdx] = newLevel
+		db.levels[task.OutputLevel] = newLevel
 	}
 
 	db.mu.Unlock()

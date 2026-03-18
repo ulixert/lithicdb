@@ -67,20 +67,22 @@ func (t *CompactionTask) AllInputs() []*sstable.TableHandle {
 
 // LevelState holds the SSTable handles for each level.
 // L0 is stored separately because it has overlapping key ranges.
+// Levels uses index = level number: Levels[0] is nil (L0 separate),
+// Levels[1] = L1, Levels[2] = L2, etc.
 type LevelState struct {
 	L0     []*sstable.TableHandle   // newest first
-	Levels [][]*sstable.TableHandle // index 0 = L1, sorted by the first key
+	Levels [][]*sstable.TableHandle // index = level number, sorted by the first key
 }
 
 // LevelSize returns the total file size for a level (by summing
 // data in each reader). Level 0 is index 0 in the Levels array.
 // For L0, call L0Size().
 func (ls *LevelState) LevelSize(level int) int64 {
-	if level <= 0 || level-1 >= len(ls.Levels) {
+	if level <= 0 || level >= len(ls.Levels) {
 		return 0
 	}
 	var total int64
-	for _, h := range ls.Levels[level-1] {
+	for _, h := range ls.Levels[level] {
 		total += int64(h.Reader.FileSize())
 	}
 	return total
@@ -134,8 +136,8 @@ func pickL0Compaction(state *LevelState, cfg Config) *CompactionTask {
 
 	// Find all overlapping L1 files
 	var overlapping []*sstable.TableHandle
-	if len(state.Levels) > 0 {
-		overlapping = findOverlapping(state.Levels[0], minKey, maxKey)
+	if len(state.Levels) > 1 {
+		overlapping = findOverlapping(state.Levels[1], minKey, maxKey)
 	}
 
 	return &CompactionTask{
@@ -151,7 +153,7 @@ func pickL0Compaction(state *LevelState, cfg Config) *CompactionTask {
 // pickLevelCompaction selects one file from the given level and all
 // overlapping files from the next level.
 func pickLevelCompaction(state *LevelState, level int, cfg Config) *CompactionTask {
-	if level-1 >= len(state.Levels) || len(state.Levels[level-1]) == 0 {
+	if level >= len(state.Levels) || len(state.Levels[level]) == 0 {
 		return nil
 	}
 
@@ -160,7 +162,7 @@ func pickLevelCompaction(state *LevelState, level int, cfg Config) *CompactionTa
 	// Pick the first file in the level (oldest by position).
 	// A smarter picker would choose the file with the most overlap
 	// into the next level, but this is correct and simple.
-	input := state.Levels[level-1][0]
+	input := state.Levels[level][0]
 	inputs := []*sstable.TableHandle{input}
 
 	minKey := input.Reader.FirstKey()
@@ -168,8 +170,8 @@ func pickLevelCompaction(state *LevelState, level int, cfg Config) *CompactionTa
 
 	// Find overlapping files in the output level
 	var overlapping []*sstable.TableHandle
-	if outputLevel-1 < len(state.Levels) {
-		overlapping = findOverlapping(state.Levels[outputLevel-1], minKey, maxKey)
+	if outputLevel < len(state.Levels) {
+		overlapping = findOverlapping(state.Levels[outputLevel], minKey, maxKey)
 	}
 
 	return &CompactionTask{
