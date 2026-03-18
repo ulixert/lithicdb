@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 )
 
 const manifestFileName = "MANIFEST"
@@ -22,11 +23,12 @@ const manifestFileName = "MANIFEST"
 // disk but is not in the manifest, it's garbage from a failed
 // operation and should be deleted.
 type Manifest struct {
+	mu   sync.Mutex
 	file *os.File
 	dir  string
 
 	// Current state, rebuilt during recovery and maintained on writes.
-	tables    map[uint64]SSTableInfo // id -> info
+	tables    map[uint64]SSTableInfo // id → info
 	nextMemID uint64
 	nextSeq   uint64
 
@@ -44,8 +46,10 @@ type State struct {
 	L0 []SSTableInfo
 
 	// Levels contain SSTables at level 1+, indexed by level.
+	// Levels[0] is nil (L0 is stored separately in the L0 field).
+	// Levels[1] = L1, Levels[2] = L2, etc. Index matches level number.
 	// Within each level, SSTables are sorted by the first key.
-	Levels map[uint8][]SSTableInfo
+	Levels [][]SSTableInfo
 
 	NextMemID uint64
 	NextSeq   uint64
@@ -157,9 +161,21 @@ func (m *Manifest) applyRecord(r Record) {
 // buildState constructs a State from the current in-memory tables.
 func (m *Manifest) buildState() *State {
 	s := &State{
-		Levels:    make(map[uint8][]SSTableInfo),
 		NextMemID: m.nextMemID,
 		NextSeq:   m.nextSeq,
+	}
+
+	// Find the maximum level to size the slice
+	maxLevel := uint8(0)
+	for _, t := range m.tables {
+		if t.Level > maxLevel {
+			maxLevel = t.Level
+		}
+	}
+
+	if maxLevel > 0 {
+		// index = level number, s.Levels[0] = nil
+		s.Levels = make([][]SSTableInfo, maxLevel+1)
 	}
 
 	for _, t := range m.tables {
@@ -177,6 +193,9 @@ func (m *Manifest) buildState() *State {
 
 	// L1+: sort by the first key ascending within each level
 	for level, tables := range s.Levels {
+		if len(tables) == 0 {
+			continue
+		}
 		sort.Slice(tables, func(i, j int) bool {
 			return bytes.Compare(tables[i].FirstKey, tables[j].FirstKey) < 0
 		})
@@ -188,6 +207,9 @@ func (m *Manifest) buildState() *State {
 
 // AddSSTable records that a new SSTable has been added.
 func (m *Manifest) AddSSTable(info SSTableInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if err := m.writeRecord(Record{
 		Type:    typeSSTableAdded,
 		SSTable: info,
@@ -200,6 +222,9 @@ func (m *Manifest) AddSSTable(info SSTableInfo) error {
 
 // RemoveSSTable records that an SSTable has been removed.
 func (m *Manifest) RemoveSSTable(id uint64, level uint8) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if err := m.writeRecord(Record{
 		Type:    typeSSTableRemoved,
 		SSTable: SSTableInfo{ID: id, Level: level},
@@ -213,6 +238,9 @@ func (m *Manifest) RemoveSSTable(id uint64, level uint8) error {
 // UpdateNextIDs records the latest ID counters.
 // Called after a flush or any operation that advances the counters.
 func (m *Manifest) UpdateNextIDs(nextMemID, nextSeq uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.nextMemID = nextMemID
 	m.nextSeq = nextSeq
 	return m.writeRecord(Record{
@@ -275,8 +303,13 @@ func (m *Manifest) maybeSnapshot() error {
 
 // Close closes the manifest file.
 func (m *Manifest) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.file == nil {
 		return nil
 	}
-	return m.file.Close()
+	err := m.file.Close()
+	m.file = nil
+	return err
 }

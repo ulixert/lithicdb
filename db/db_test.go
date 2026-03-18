@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ulixert/lithicdb/compaction"
 	"github.com/ulixert/lithicdb/iterator"
 	"github.com/ulixert/lithicdb/kv"
 )
@@ -16,6 +17,7 @@ func testOpts(dir string) Options {
 		Dir:          dir,
 		MemtableSize: 4096,
 		BlockSize:    256,
+		Compaction:   compaction.DefaultConfig(),
 	}
 }
 

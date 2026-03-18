@@ -99,6 +99,11 @@ func (r *Reader) NumBlocks() int {
 	return len(r.metas)
 }
 
+// FileSize returns the total size of the SSTable file in bytes.
+func (r *Reader) FileSize() int {
+	return len(r.data)
+}
+
 // MayContain checks the bloom filter for the given user key.
 // Returns true if the key might be present, false if definitely absent.
 // The argument must be a user key, not an internal key, because

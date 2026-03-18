@@ -124,16 +124,20 @@ func TestManifest_MultiLevel(t *testing.T) {
 		t.Fatalf("L0 count = %d, want 1", len(state.L0))
 	}
 
-	l1 := state.Levels[1]
+	// state.Levels[0] = nil (L0 separate), state.Levels[1] = L1, state.Levels[2] = L2
+	if len(state.Levels) < 3 {
+		t.Fatalf("Levels length = %d, want >= 3", len(state.Levels))
+	}
+
+	l1 := state.Levels[1] // L1
 	if len(l1) != 2 {
 		t.Fatalf("L1 count = %d, want 2", len(l1))
 	}
-	// L1 sorted by first key
 	if string(l1[0].FirstKey) != "a" || string(l1[1].FirstKey) != "n" {
 		t.Errorf("L1 first keys = [%q, %q], want [a, n]", l1[0].FirstKey, l1[1].FirstKey)
 	}
 
-	l2 := state.Levels[2]
+	l2 := state.Levels[2] // L2
 	if len(l2) != 1 {
 		t.Fatalf("L2 count = %d, want 1", len(l2))
 	}
@@ -313,7 +317,7 @@ func TestManifest_Empty(t *testing.T) {
 		t.Errorf("L0 count = %d, want 0", len(state.L0))
 	}
 	if len(state.Levels) != 0 {
-		t.Errorf("Levels count = %d, want 0", len(state.Levels))
+		t.Errorf("Levels length = %d, want 0", len(state.Levels))
 	}
 }
 
