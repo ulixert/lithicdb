@@ -69,7 +69,7 @@ func (t *CompactionTask) AllInputs() []*sstable.TableHandle {
 // L0 is stored separately because it has overlapping key ranges.
 type LevelState struct {
 	L0     []*sstable.TableHandle   // newest first
-	Levels [][]*sstable.TableHandle // index 0 = L1, sorted by first key
+	Levels [][]*sstable.TableHandle // index 0 = L1, sorted by the first key
 }
 
 // LevelSize returns the total file size for a level (by summing

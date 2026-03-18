@@ -1,10 +1,13 @@
 package db
 
 import (
+	"bytes"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 
+	"github.com/ulixert/lithicdb/compaction"
 	"github.com/ulixert/lithicdb/iterator"
 	"github.com/ulixert/lithicdb/kv"
 	"github.com/ulixert/lithicdb/manifest"
@@ -18,6 +21,7 @@ type Options struct {
 	Dir          string
 	MemtableSize int64
 	BlockSize    int
+	Compaction   compaction.Config
 }
 
 // DefaultOptions returns reasonable defaults.
@@ -26,6 +30,7 @@ func DefaultOptions(dir string) Options {
 		Dir:          dir,
 		MemtableSize: 64 * 1024 * 1024, // 64MB
 		BlockSize:    4096,             // 4KB
+		Compaction:   compaction.DefaultConfig(),
 	}
 }
 
@@ -41,16 +46,27 @@ type DB struct {
 	mu         sync.RWMutex
 	active     *memtable.Memtable
 	activeWAL  *wal.WAL
-	immutables []*memtable.Memtable // frozen, newest first
-	l0         []*sstable.Reader    // L0 SSTables, newest first
+	immutables []*memtable.Memtable     // frozen, newest first
+	l0         []*sstable.TableHandle   // L0 SSTables, newest first
+	levels     [][]*sstable.TableHandle // levels[0] = L1, sorted by the first key
 
 	manifest  *manifest.Manifest
 	nextMemID atomic.Uint64
 	nextSeq   atomic.Uint64 // global monotonic sequence number
 
-	flushCh chan struct{}
-	closeCh chan struct{}
-	wg      sync.WaitGroup
+	flushCh   chan struct{}
+	compactCh chan struct{}
+	closeCh   chan struct{}
+	wg        sync.WaitGroup
+}
+
+// idAllocator adapts DB's nextMemID counter to the compaction.IDAllocator interface.
+type idAllocator struct {
+	db *DB
+}
+
+func (a *idAllocator) NextID() uint64 {
+	return a.db.nextMemID.Add(1)
 }
 
 // Open creates or recovers a DB at the given directory.
@@ -64,9 +80,15 @@ func Open(opts Options) (*DB, error) {
 	}
 
 	db := &DB{
-		opts:    opts,
-		flushCh: make(chan struct{}, 1),
-		closeCh: make(chan struct{}),
+		opts:      opts,
+		flushCh:   make(chan struct{}, 1),
+		compactCh: make(chan struct{}, 1),
+		closeCh:   make(chan struct{}),
+	}
+
+	// Ensure levels slice has enough capacity
+	if opts.Compaction.MaxLevels > 1 {
+		db.levels = make([][]*sstable.TableHandle, opts.Compaction.MaxLevels-1)
 	}
 
 	if err := db.recover(); err != nil {
@@ -79,8 +101,9 @@ func Open(opts Options) (*DB, error) {
 		}
 	}
 
-	db.wg.Add(1)
+	db.wg.Add(2)
 	go db.flushLoop()
+	go db.compactionLoop()
 
 	return db, nil
 }
@@ -119,12 +142,25 @@ func (db *DB) recover() error {
 	for _, info := range state.L0 {
 		reader, err := sstable.OpenReader(db.opts.Dir, info.ID)
 		if err != nil {
-			return fmt.Errorf("open SSTable %d: %w", info.ID, err)
+			return fmt.Errorf("open L0 SSTable %d: %w", info.ID, err)
 		}
-		db.l0 = append(db.l0, reader)
+		db.l0 = append(db.l0, sstable.NewTableHandle(reader, db.opts.Dir))
 	}
 
-	// TODO: open L1+ SSTables when leveled compaction is implemented
+	// Open L1+ SSTables
+	for level, tables := range state.Levels {
+		levelIdx := int(level) - 1 // state.Levels is keyed by level number, db.levels is 0-indexed (L1=0)
+		if levelIdx < 0 || levelIdx >= len(db.levels) {
+			return fmt.Errorf("manifest contains L%d SSTables but DB is configured for only %d levels", level, len(db.levels)+1)
+		}
+		for _, info := range tables {
+			reader, err := sstable.OpenReader(db.opts.Dir, info.ID)
+			if err != nil {
+				return fmt.Errorf("open L%d SSTable %d: %w", level, info.ID, err)
+			}
+			db.levels[levelIdx] = append(db.levels[levelIdx], sstable.NewTableHandle(reader, db.opts.Dir))
+		}
+	}
 
 	// Replay WAL files for unflushed memtable data
 	recovered, err := wal.RecoverDir(db.opts.Dir)
@@ -237,26 +273,27 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 	active := db.active
 	immutables := db.immutables
 	l0 := db.l0
+	levels := db.levels
 	db.mu.RUnlock()
 
-	// Check the active memtable
+	// Active memtable
 	if val, found := active.Get(key); found {
 		return val, true
 	}
 
-	// Check immutable memtables (newest first)
+	// Immutable memtables (newest first)
 	for _, mt := range immutables {
 		if val, found := mt.Get(key); found {
 			return val, true
 		}
 	}
 
-	// Check L0 SSTables (newest first)
-	for _, sst := range l0 {
-		if !sst.MayContain(key) {
+	// L0 SSTables (newest first, may overlap)
+	for _, h := range l0 {
+		if !h.Reader.MayContain(key) {
 			continue
 		}
-		val, found, err := sst.Get(key)
+		val, found, err := h.Reader.Get(key)
 		if err != nil {
 			// Skip this SSTable rather than failing the entire read.
 			// This means corruption in one file doesn't block reads
@@ -269,25 +306,54 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 		}
 	}
 
+	// L1+ are non-overlapping within each level, so for a given user
+	// key there is at most one candidate SSTable per level.
+	for _, level := range levels {
+		for _, h := range level {
+			if !h.Reader.MayContain(key) {
+				continue
+			}
+			val, found, err := h.Reader.Get(key)
+			if err != nil {
+				continue
+			}
+			if found {
+				return val, true
+			}
+		}
+	}
+
 	return kv.Value{}, false
 }
 
 // Scan returns an iterator over all entries in sorted key order.
+//
+// The iterator reads from in-memory data (Readers load the full file
+// into memory), so it does not need to hold TableHandle references.
+// If the Reader switches to mmap, iterators would need to Ref/Unref.
+//
 // Returns internal keys. The caller must call Close().
 func (db *DB) Scan() iterator.Iterator {
 	db.mu.RLock()
 	active := db.active
 	immutables := db.immutables
 	l0 := db.l0
+	levels := db.levels
 	db.mu.RUnlock()
 
-	iters := make([]iterator.Iterator, 0, 1+len(immutables)+len(l0))
+	iters := make([]iterator.Iterator, 0, 1+len(immutables)+len(l0)+len(levels))
+
 	iters = append(iters, active.Scan())
 	for _, mt := range immutables {
 		iters = append(iters, mt.Scan())
 	}
-	for _, sst := range l0 {
-		iters = append(iters, sst.Scan())
+	for _, h := range l0 {
+		iters = append(iters, h.Reader.Scan())
+	}
+	for _, level := range levels {
+		for _, h := range level {
+			iters = append(iters, h.Reader.Scan())
+		}
 	}
 
 	return iterator.NewMergeIterator(iters)
@@ -300,15 +366,22 @@ func (db *DB) ScanRange(start, end []byte) iterator.Iterator {
 	active := db.active
 	immutables := db.immutables
 	l0 := db.l0
+	levels := db.levels
 	db.mu.RUnlock()
 
-	iters := make([]iterator.Iterator, 0, 1+len(immutables)+len(l0))
+	iters := make([]iterator.Iterator, 0, 1+len(immutables)+len(l0)+len(levels))
+
 	iters = append(iters, active.ScanRange(start, end))
 	for _, mt := range immutables {
 		iters = append(iters, mt.ScanRange(start, end))
 	}
-	for _, sst := range l0 {
-		iters = append(iters, sst.ScanRange(start, end))
+	for _, h := range l0 {
+		iters = append(iters, h.Reader.ScanRange(start, end))
+	}
+	for _, level := range levels {
+		for _, h := range level {
+			iters = append(iters, h.Reader.ScanRange(start, end))
+		}
 	}
 
 	return iterator.NewMergeIterator(iters)
@@ -332,6 +405,8 @@ func (db *DB) rotateMemtable() error {
 
 	return nil
 }
+
+// --- Flush goroutine ---
 
 func (db *DB) flushLoop() {
 	defer db.wg.Done()
@@ -432,15 +507,212 @@ func (db *DB) flushMemtable(mt *memtable.Memtable) error {
 	}
 
 	// Now update in-memory state
+	handle := sstable.NewTableHandle(reader, db.opts.Dir)
+
 	db.mu.Lock()
-	db.l0 = append([]*sstable.Reader{reader}, db.l0...)
+	db.l0 = append([]*sstable.TableHandle{handle}, db.l0...)
 	db.immutables = db.immutables[:len(db.immutables)-1]
 	db.mu.Unlock()
 
 	// Delete WAL - data is now durable in the SSTable and manifest
 	wal.RemoveByID(db.opts.Dir, id)
 
+	// Single compaction check after adding to L0
+	db.triggerCompaction()
+
 	return nil
+}
+
+// --- Compaction goroutine ---
+
+func (db *DB) compactionLoop() {
+	defer db.wg.Done()
+
+	for {
+		select {
+		case <-db.compactCh:
+			db.runCompaction()
+		case <-db.closeCh:
+			return
+		}
+	}
+}
+
+func (db *DB) triggerCompaction() {
+	select {
+	case db.compactCh <- struct{}{}:
+	default:
+	}
+}
+
+// runCompaction checks if compaction is needed and executes it.
+// Loops until no more compactions are needed.
+func (db *DB) runCompaction() {
+	for {
+		db.mu.RLock()
+		state := db.buildLevelState()
+		db.mu.RUnlock()
+
+		task := compaction.PickCompaction(state, db.opts.Compaction)
+		if task == nil {
+			return
+		}
+
+		// Ref all input handles so they aren't deleted during compaction
+		for _, h := range task.AllInputs() {
+			h.Ref()
+		}
+
+		result, err := compaction.Execute(
+			task,
+			db.opts.Dir,
+			db.opts.BlockSize,
+			int64(db.opts.Compaction.LevelSizeBase)/10, // target file size ~1/10 of level size
+			&idAllocator{db: db},
+		)
+
+		// Unref inputs regardless of success/failure
+		for _, h := range task.AllInputs() {
+			h.Unref()
+		}
+
+		if err != nil {
+			// TODO: log error
+			return
+		}
+
+		if err := db.applyCompactionResult(result); err != nil {
+			// TODO: log error
+			return
+		}
+	}
+}
+
+// buildLevelState creates a snapshot of the current LSM levels for
+// the compaction picker. Must be called with mu.RLock held.
+func (db *DB) buildLevelState() *compaction.LevelState {
+	state := &compaction.LevelState{
+		L0:     make([]*sstable.TableHandle, len(db.l0)),
+		Levels: make([][]*sstable.TableHandle, len(db.levels)),
+	}
+	copy(state.L0, db.l0)
+	for i, level := range db.levels {
+		state.Levels[i] = make([]*sstable.TableHandle, len(level))
+		copy(state.Levels[i], level)
+	}
+	return state
+}
+
+// applyCompactionResult atomically updates the manifest and in-memory
+// state after a successful compaction.
+func (db *DB) applyCompactionResult(result *compaction.CompactionResult) error {
+	task := result.Task
+
+	// 1. Add new SSTables to the manifest
+	for _, reader := range result.NewTables {
+		if err := db.manifest.AddSSTable(manifest.SSTableInfo{
+			ID:       reader.ID(),
+			Level:    uint8(task.OutputLevel),
+			FirstKey: reader.FirstKey(),
+			LastKey:  reader.LastKey(),
+		}); err != nil {
+			return fmt.Errorf("db: manifest add compaction output: %w", err)
+		}
+	}
+
+	// 2. Remove old SSTables from the manifest
+	for _, h := range task.Inputs {
+		if err := db.manifest.RemoveSSTable(h.Reader.ID(), uint8(task.InputLevel)); err != nil {
+			return fmt.Errorf("db: manifest remove input: %w", err)
+		}
+	}
+	for _, h := range task.Overlapping {
+		if err := db.manifest.RemoveSSTable(h.Reader.ID(), uint8(task.OutputLevel)); err != nil {
+			return fmt.Errorf("db: manifest remove overlapping: %w", err)
+		}
+	}
+
+	// 3. Update IDs
+	if err := db.manifest.UpdateNextIDs(
+		db.nextMemID.Load(),
+		db.nextSeq.Load(),
+	); err != nil {
+		return fmt.Errorf("db: manifest update IDs after compaction: %w", err)
+	}
+
+	// 4. Create handles for new SSTables
+	newHandles := make([]*sstable.TableHandle, len(result.NewTables))
+	for i, reader := range result.NewTables {
+		newHandles[i] = sstable.NewTableHandle(reader, db.opts.Dir)
+	}
+
+	// 5. Build a set of obsolete SSTable IDs for fast lookup
+	obsoleteIDs := make(map[uint64]bool)
+	for _, h := range task.AllInputs() {
+		obsoleteIDs[h.Reader.ID()] = true
+	}
+
+	// 6. Atomically swap in-memory state
+	db.mu.Lock()
+
+	if task.InputLevel == 0 {
+		// Remove compacted L0 files
+		newL0 := make([]*sstable.TableHandle, 0, len(db.l0))
+		for _, h := range db.l0 {
+			if !obsoleteIDs[h.Reader.ID()] {
+				newL0 = append(newL0, h)
+			}
+		}
+		db.l0 = newL0
+	} else {
+		// Remove compacted files from the input level
+		inputIdx := task.InputLevel - 1
+		if inputIdx < len(db.levels) {
+			newLevel := make([]*sstable.TableHandle, 0, len(db.levels[inputIdx]))
+			for _, h := range db.levels[inputIdx] {
+				if !obsoleteIDs[h.Reader.ID()] {
+					newLevel = append(newLevel, h)
+				}
+			}
+			db.levels[inputIdx] = newLevel
+		}
+	}
+
+	// Remove compacted files from the output level
+	outputIdx := task.OutputLevel - 1
+	if outputIdx >= 0 && outputIdx < len(db.levels) {
+		newLevel := make([]*sstable.TableHandle, 0, len(db.levels[outputIdx]))
+		for _, h := range db.levels[outputIdx] {
+			if !obsoleteIDs[h.Reader.ID()] {
+				newLevel = append(newLevel, h)
+			}
+		}
+		// Insert new handles (sorted by the first key for L1+)
+		newLevel = append(newLevel, newHandles...)
+		sortHandlesByFirstKey(newLevel)
+		db.levels[outputIdx] = newLevel
+	}
+
+	db.mu.Unlock()
+
+	// 7. Release the DB's ownership reference and mark obsolete.
+	// If an active iterator still holds a Ref, the file deletion
+	// is deferred until the iterator calls Unref. If no iterator
+	// holds a reference, the file is deleted immediately.
+	for _, h := range task.AllInputs() {
+		h.MarkObsolete()
+		h.Unref() // release DB's initial reference
+	}
+
+	return nil
+}
+
+func sortHandlesByFirstKey(handles []*sstable.TableHandle) {
+	sort.Slice(handles, func(i, j int) bool {
+		return bytes.Compare(
+			handles[i].Reader.FirstKey(),
+			handles[j].Reader.FirstKey()) < 0
+	})
 }
 
 // Close gracefully shuts down the engine.
