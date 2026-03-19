@@ -41,7 +41,7 @@ type IDAllocator interface {
 // The executor does NOT modify any shared state - it only reads input
 // files and writes new files. The caller is responsible for atomically
 // updating the manifest and LSM state.
-func Execute(task *CompactionTask, dir string, blockSize int, targetFileSize int64, alloc IDAllocator) (*CompactionResult, error) {
+func Execute(task *CompactionTask, dir string, blockSize int, targetFileSize int64, alloc IDAllocator, cache *sstable.BlockCache) (*CompactionResult, error) {
 	// Build iterators over all inputs.
 	// Input level files come first (higher priority = newer data).
 	iters := make([]iterator.Iterator, 0, len(task.Inputs)+len(task.Overlapping))
@@ -73,7 +73,7 @@ func Execute(task *CompactionTask, dir string, blockSize int, targetFileSize int
 			return fmt.Errorf("compaction: finish SSTable %d: %w", currentID, err)
 		}
 
-		reader, err := sstable.OpenReader(dir, currentID)
+		reader, err := sstable.OpenReader(dir, currentID, cache)
 		if err != nil {
 			return fmt.Errorf("compaction: open new SSTable %d: %w", currentID, err)
 		}

@@ -15,10 +15,11 @@ import (
 
 // Options configure the storage engine.
 type Options struct {
-	Dir          string
-	MemtableSize int64
-	BlockSize    int
-	Compaction   compaction.Config
+	Dir            string
+	MemtableSize   int64
+	BlockSize      int
+	BlockCacheSize int64 // total block cache capacity in bytes (0 = 8MB default)
+	Compaction     compaction.Config
 }
 
 // DefaultOptions returns reasonable defaults.
@@ -49,6 +50,7 @@ type DB struct {
 	levels     [][]*sstable.TableHandle // levels[0] = nil (L0 separate), levels[1] = L1, etc.
 
 	manifest  *manifest.Manifest
+	cache     *sstable.BlockCache
 	nextMemID atomic.Uint64
 	nextSeq   atomic.Uint64
 
@@ -70,6 +72,7 @@ func Open(opts Options) (*DB, error) {
 
 	db := &DB{
 		opts:      opts,
+		cache:     sstable.NewBlockCache(opts.BlockCacheSize),
 		flushCh:   make(chan struct{}, 1),
 		compactCh: make(chan struct{}, 1),
 		closeCh:   make(chan struct{}),
@@ -124,7 +127,7 @@ func (db *DB) recover() error {
 
 	// Open L0 SSTables
 	for _, info := range state.L0 {
-		reader, err := sstable.OpenReader(db.opts.Dir, info.ID)
+		reader, err := sstable.OpenReader(db.opts.Dir, info.ID, db.cache)
 		if err != nil {
 			return fmt.Errorf("open L0 SSTable %d: %w", info.ID, err)
 		}
@@ -137,7 +140,7 @@ func (db *DB) recover() error {
 			continue
 		}
 		for _, info := range tables {
-			reader, err := sstable.OpenReader(db.opts.Dir, info.ID)
+			reader, err := sstable.OpenReader(db.opts.Dir, info.ID, db.cache)
 			if err != nil {
 				return fmt.Errorf("open L%d SSTable %d: %w", level, info.ID, err)
 			}

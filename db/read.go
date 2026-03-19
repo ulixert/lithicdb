@@ -46,17 +46,19 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 	}
 
 	// L1+ (non-overlapping within each level)
-	for _, level := range levels[1:] {
-		for _, h := range level {
-			if !h.Reader.MayContain(key) {
-				continue
-			}
-			val, found, err := h.Reader.Get(key)
-			if err != nil {
-				continue
-			}
-			if found {
-				return val, true
+	if len(levels) > 1 {
+		for _, level := range levels[1:] {
+			for _, h := range level {
+				if !h.Reader.MayContain(key) {
+					continue
+				}
+				val, found, err := h.Reader.Get(key)
+				if err != nil {
+					continue
+				}
+				if found {
+					return val, true
+				}
 			}
 		}
 	}
@@ -88,9 +90,11 @@ func (db *DB) Scan() iterator.Iterator {
 	for _, h := range l0 {
 		iters = append(iters, h.Reader.Scan())
 	}
-	for _, level := range levels[1:] {
-		for _, h := range level {
-			iters = append(iters, h.Reader.Scan())
+	if len(levels) > 1 {
+		for _, level := range levels[1:] {
+			for _, h := range level {
+				iters = append(iters, h.Reader.Scan())
+			}
 		}
 	}
 

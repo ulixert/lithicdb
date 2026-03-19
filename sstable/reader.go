@@ -12,7 +12,8 @@ import (
 
 // Reader provides read access to an SSTable file. On open, it reads
 // the footer, bloom filter, and index block into memory. Data blocks
-// are read on demand during Get or Scan operations.
+// are read on demand during Get or Scan operations, optionally via
+// a shared BlockCache.
 //
 // Reader is safe for concurrent use by multiple goroutines.
 type Reader struct {
@@ -21,10 +22,12 @@ type Reader struct {
 	bloom    []byte
 	firstKey []byte
 	metas    []blockMeta
+	cache    *BlockCache
 }
 
 // OpenReader opens an SSTable file and reads its metadata.
-func OpenReader(dir string, id uint64) (*Reader, error) {
+// If the cache is non-nil, block reads will go through the cache.
+func OpenReader(dir string, id uint64, cache ...*BlockCache) (*Reader, error) {
 	path := SSTPath(dir, id)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -62,13 +65,19 @@ func OpenReader(dir string, id uint64) (*Reader, error) {
 		return nil, fmt.Errorf("sstable: %s: %w", path, err)
 	}
 
-	return &Reader{
+	r := &Reader{
 		id:       id,
 		data:     data,
 		bloom:    bloom,
 		firstKey: firstKey,
 		metas:    metas,
-	}, nil
+	}
+
+	if len(cache) > 0 && cache[0] != nil {
+		r.cache = cache[0]
+	}
+
+	return r, nil
 }
 
 // ID returns the SSTable's unique identifier.
@@ -113,12 +122,41 @@ func (r *Reader) MayContain(userKey []byte) bool {
 }
 
 // readBlock reads and verifies the data block at the given index.
+// If a cache is configured, checks the cache first and populates
+// it on a miss.
 func (r *Reader) readBlock(blockIdx int) (*Block, error) {
 	if blockIdx < 0 || blockIdx >= len(r.metas) {
 		return nil, fmt.Errorf("sstable: block index %d out of range [0, %d)", blockIdx, len(r.metas))
 	}
 
 	meta := r.metas[blockIdx]
+
+	// Check cache
+	if r.cache != nil {
+		cacheKey := BlockCacheKey{
+			SSTID:       r.id,
+			BlockOffset: meta.offset,
+		}
+		if block := r.cache.Get(cacheKey); block != nil {
+			return block, nil
+		}
+
+		// Cache miss - read, verify, decode, then populate cache
+		block, err := r.readBlockFromData(blockIdx, meta)
+		if err != nil {
+			return nil, err
+		}
+
+		r.cache.Put(cacheKey, block, int64(meta.size))
+		return block, nil
+	}
+
+	return r.readBlockFromData(blockIdx, meta)
+}
+
+// readBlockFromData reads a block directly from the in-memory file data,
+// verifies its checksum, and decodes it.
+func (r *Reader) readBlockFromData(blockIdx int, meta blockMeta) (*Block, error) {
 	blockEnd := meta.offset + uint64(meta.size)
 
 	// Read block data + checksum
