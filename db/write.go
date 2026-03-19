@@ -8,9 +8,12 @@ import (
 )
 
 // Put inserts or updates a key-value pair.
+// Blocks if there are too many unflushed memtables (backpressure).
 func (db *DB) Put(key, value []byte) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	db.waitForFlushSpace()
 
 	seq := db.nextSeq.Add(1)
 
@@ -31,9 +34,12 @@ func (db *DB) Put(key, value []byte) error {
 }
 
 // Delete marks a key as deleted.
+// Blocks if there are too many unflushed memtables (backpressure).
 func (db *DB) Delete(key []byte) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	db.waitForFlushSpace()
 
 	seq := db.nextSeq.Add(1)
 
@@ -51,6 +57,15 @@ func (db *DB) Delete(key []byte) error {
 	}
 
 	return nil
+}
+
+// waitForFlushSpace blocks until there's room for another immutable
+// memtable. Called with mu.Lock held. cond.Wait releases the lock,
+// allowing the flush goroutine to make progress, then re-acquires it.
+func (db *DB) waitForFlushSpace() {
+	for len(db.immutables) >= db.opts.MaxImmutableCount {
+		db.flushDone.Wait()
+	}
 }
 
 // rotateMemtable freezes the active memtable, creates a new one,
