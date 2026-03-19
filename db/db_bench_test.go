@@ -4,19 +4,24 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+
+	"github.com/ulixert/lithicdb/compaction"
 )
 
-func benchOpts(dir string) Options {
+// --- Memtable-only benchmarks (no flush, all data in memory) ---
+
+func memtableOnlyOpts(dir string) Options {
 	return Options{
 		Dir:          dir,
-		MemtableSize: 64 * 1024 * 1024, // 64MB — large enough to avoid flushes during bench
+		MemtableSize: 256 * 1024 * 1024, // 256MB — no flushes
 		BlockSize:    4096,
+		Compaction:   compaction.DefaultConfig(),
 	}
 }
 
-func BenchmarkPut_Sequential(b *testing.B) {
+func BenchmarkMemtable_Put_Sequential(b *testing.B) {
 	dir := b.TempDir()
-	d, err := Open(benchOpts(dir))
+	d, err := Open(memtableOnlyOpts(dir))
 	if err != nil {
 		b.Fatalf("Open: %v", err)
 	}
@@ -35,42 +40,18 @@ func BenchmarkPut_Sequential(b *testing.B) {
 	}
 }
 
-func BenchmarkPut_Random(b *testing.B) {
+func BenchmarkMemtable_Get_Hit(b *testing.B) {
 	dir := b.TempDir()
-	d, err := Open(benchOpts(dir))
+	d, err := Open(memtableOnlyOpts(dir))
 	if err != nil {
 		b.Fatalf("Open: %v", err)
 	}
 	defer d.Close()
 
-	val := make([]byte, 100)
-	rng := rand.New(rand.NewSource(42))
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		key := fmt.Appendf(nil, "key-%016d", rng.Int63())
-		if err := d.Put(key, val); err != nil {
-			b.Fatalf("Put: %v", err)
-		}
-	}
-}
-
-func BenchmarkGet_Hit(b *testing.B) {
-	dir := b.TempDir()
-	d, err := Open(benchOpts(dir))
-	if err != nil {
-		b.Fatalf("Open: %v", err)
-	}
-	defer d.Close()
-
-	// Pre-populate with 10K keys
 	n := 10000
 	val := make([]byte, 100)
 	for i := 0; i < n; i++ {
-		key := fmt.Appendf(nil, "key-%016d", i)
-		d.Put(key, val)
+		d.Put(fmt.Appendf(nil, "key-%016d", i), val)
 	}
 
 	rng := rand.New(rand.NewSource(42))
@@ -84,20 +65,73 @@ func BenchmarkGet_Hit(b *testing.B) {
 	}
 }
 
-func BenchmarkGet_Miss(b *testing.B) {
-	dir := b.TempDir()
-	d, err := Open(benchOpts(dir))
+// --- SSTable benchmarks (data flushed to disk, exercises full read path) ---
+
+func sstableOpts(dir string) Options {
+	return Options{
+		Dir:            dir,
+		MemtableSize:   4096, // tiny — forces frequent flushes
+		BlockSize:      4096,
+		BlockCacheSize: 8 * 1024 * 1024, // 8MB cache
+		Compaction: compaction.Config{
+			L0CompactionTrigger: 4,
+			LevelSizeBase:       256 * 1024 * 1024,
+			LevelSizeMultiplier: 10,
+			MaxLevels:           7,
+		},
+	}
+}
+
+// prepareSSTableDB writes n keys, waits for all flushes and compaction,
+// then returns the open DB with all data in SSTables.
+func prepareSSTableDB(b *testing.B, dir string, n int) *DB {
+	b.Helper()
+
+	d, err := Open(sstableOpts(dir))
 	if err != nil {
 		b.Fatalf("Open: %v", err)
 	}
+
+	val := make([]byte, 100)
+	for i := 0; i < n; i++ {
+		key := fmt.Appendf(nil, "key-%016d", i)
+		if err := d.Put(key, val); err != nil {
+			b.Fatalf("Put: %v", err)
+		}
+	}
+
+	// Force all data to SSTables
+	d.Close()
+
+	d2, err := Open(sstableOpts(dir))
+	if err != nil {
+		b.Fatalf("Reopen: %v", err)
+	}
+
+	return d2
+}
+
+func BenchmarkSSTable_Get_Hit(b *testing.B) {
+	dir := b.TempDir()
+	n := 10000
+	d := prepareSSTableDB(b, dir, n)
 	defer d.Close()
 
-	// Pre-populate
-	val := make([]byte, 100)
-	for i := 0; i < 10000; i++ {
-		key := fmt.Appendf(nil, "key-%016d", i)
-		d.Put(key, val)
+	rng := rand.New(rand.NewSource(42))
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		key := fmt.Appendf(nil, "key-%016d", rng.Intn(n))
+		d.Get(key)
 	}
+}
+
+func BenchmarkSSTable_Get_Miss(b *testing.B) {
+	dir := b.TempDir()
+	d := prepareSSTableDB(b, dir, 10000)
+	defer d.Close()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -108,20 +142,33 @@ func BenchmarkGet_Miss(b *testing.B) {
 	}
 }
 
-func BenchmarkScan(b *testing.B) {
+func BenchmarkSSTable_Get_CacheHit(b *testing.B) {
 	dir := b.TempDir()
-	d, err := Open(benchOpts(dir))
-	if err != nil {
-		b.Fatalf("Open: %v", err)
-	}
+	n := 10000
+	d := prepareSSTableDB(b, dir, n)
 	defer d.Close()
 
-	// Pre-populate
-	val := make([]byte, 100)
-	for i := 0; i < 10000; i++ {
+	// Warm the cache by reading every key once
+	for i := 0; i < n; i++ {
 		key := fmt.Appendf(nil, "key-%016d", i)
-		d.Put(key, val)
+		d.Get(key)
 	}
+
+	rng := rand.New(rand.NewSource(42))
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		key := fmt.Appendf(nil, "key-%016d", rng.Intn(n))
+		d.Get(key)
+	}
+}
+
+func BenchmarkSSTable_Scan(b *testing.B) {
+	dir := b.TempDir()
+	d := prepareSSTableDB(b, dir, 10000)
+	defer d.Close()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -134,5 +181,28 @@ func BenchmarkScan(b *testing.B) {
 			iter.Next()
 		}
 		iter.Close()
+	}
+}
+
+// --- Put with flushes (measures WAL + memtable + flush overhead) ---
+
+func BenchmarkPut_WithFlush(b *testing.B) {
+	dir := b.TempDir()
+	d, err := Open(sstableOpts(dir))
+	if err != nil {
+		b.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+
+	val := make([]byte, 100)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		key := fmt.Appendf(nil, "key-%016d", i)
+		if err := d.Put(key, val); err != nil {
+			b.Fatalf("Put: %v", err)
+		}
 	}
 }
