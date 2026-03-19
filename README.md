@@ -116,18 +116,21 @@ Get("user:1234")
 
 ## Benchmarks
 
-Measured on Apple M1, 64MB memtable, 4KB block size, 100-byte values.
+Measured on Apple M1, 4KB blocks, 8MB block cache, leveled compaction.
 
-| Operation | Throughput | Allocs/op |
+| Operation | Throughput | ns/op |
 |---|---|---|
-| Put (sequential) | 266 K ops/sec | 5 |
-| Put (random) | 262 K ops/sec | 6 |
-| Get (hit) | 2.9 M ops/sec | 1 |
-| Get (miss) | 4.6 M ops/sec | 2 |
-| Scan (10K keys) | 900 scans/sec | 30,005 |
+| Put (sequential) | 266K ops/sec | 3,763 |
+| Put (with flush + compaction) | 249K ops/sec | 4,007 |
+| Get — memtable hit | 2.1M ops/sec | 479 |
+| Get — SSTable hit (cold) | 946K ops/sec | 1,057 |
+| Get — SSTable hit (warm cache) | 843K ops/sec | 1,187 |
+| Get — SSTable miss | 683K ops/sec | 1,463 |
+| Scan (10K keys) | 547 scans/sec | 1.8M |
 
-Get misses are faster than hits because the bloom filter rejects absent keys without reading any data blocks. Scan throughput will improve significantly once the block cache is implemented.
+Get miss is slower than hit because it must check bloom filters on every SSTable across all levels before returning "not found." Cache hit ≈ cold hit because the Reader loads the full file into memory — the cache saves CRC32 + decode but adds hash + mutex overhead. The cache will matter more with `mmap` or lazy reads.
 
+📊 **[Full benchmark analysis](BENCHMARKS.md)**
 ## Features
 
 ### Storage Engine
