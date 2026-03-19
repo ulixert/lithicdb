@@ -149,7 +149,7 @@ Get miss is slower than hit because it must check bloom filters on every SSTable
 - [x] Leveled compaction (L0 → L1 → L2, 10x size ratio, background worker)
 - [x] Reference-counted SSTables (safe deletion while iterators are active)
 - [x] Block cache (sharded LRU for decoded blocks)
-- [ ] Write batch API (atomic multi-key writes)
+- [x] Write batch API (atomic multi-key writes)
 - [ ] Write backpressure (block when flush can't keep up)
 
 ### MVCC & Transactions
