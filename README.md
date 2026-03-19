@@ -11,6 +11,7 @@ LithicDB is a from-scratch implementation of a log-structured merge-tree storage
 1. [Building LithicDB: A Distributed LSM Storage Engine from Scratch in Go](https://ulixert.github.io/posts/building-lithicdb/)
 2. [The Storage Foundation: Memtable, WAL, and SSTables](https://ulixert.github.io/posts/lithicdb-storage-foundation/)
 3. [Sequence Numbers, the Merge Iterator, and Wiring It All Together](https://ulixert.github.io/posts/lithicdb-wiring-it-together/)
+4. [Making the Engine Self-Maintaining: Compaction, Caching, and Durability](https://ulixert.github.io/posts/lithicdb-self-maintaining/)
 
 ## Getting Started
 
@@ -150,7 +151,7 @@ Get miss is slower than hit because it must check bloom filters on every SSTable
 - [x] Reference-counted SSTables (safe deletion while iterators are active)
 - [x] Block cache (sharded LRU for decoded blocks)
 - [x] Write batch API (atomic multi-key writes)
-- [ ] Write backpressure (block when flush can't keep up)
+- [x] Write backpressure (block when flush can't keep up)
 
 ### MVCC & Transactions
 - [ ] Snapshot isolation (`db.GetSnapshot()` for point-in-time reads)

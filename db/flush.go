@@ -25,7 +25,7 @@ func (db *DB) flushLoop() {
 }
 
 // flushImmutables flushes all immutable memtables to SSTables,
-// oldest first. Loops until the immutables list is empty, so a
+// the oldest first. Loops until the immutables list is empty, so a
 // single signal on flushCh is enough to drain the entire backlog.
 func (db *DB) flushImmutables() {
 	for {
@@ -107,6 +107,9 @@ func (db *DB) flushMemtable(mt *memtable.Memtable) error {
 	db.l0 = append([]*sstable.TableHandle{handle}, db.l0...)
 	db.immutables = db.immutables[:len(db.immutables)-1]
 	db.mu.Unlock()
+
+	// Wake any writers blocked on backpressure
+	db.flushDone.Broadcast()
 
 	wal.RemoveByID(db.opts.Dir, id)
 

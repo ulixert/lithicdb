@@ -83,6 +83,8 @@ func (b *WriteBatch) Commit() error {
 	b.db.mu.Lock()
 	defer b.db.mu.Unlock()
 
+	b.db.waitForFlushSpace()
+
 	// Assign a contiguous range of sequence numbers.
 	// Each operation gets its own seq so that within the batch,
 	// later operations on the same key win (correct for

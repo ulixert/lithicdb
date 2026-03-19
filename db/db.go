@@ -15,20 +15,22 @@ import (
 
 // Options configure the storage engine.
 type Options struct {
-	Dir            string
-	MemtableSize   int64
-	BlockSize      int
-	BlockCacheSize int64 // total block cache capacity in bytes (0 = 8MB default)
-	Compaction     compaction.Config
+	Dir               string
+	MemtableSize      int64
+	BlockSize         int
+	BlockCacheSize    int64 // total block cache capacity in bytes (0 = 8MB default)
+	MaxImmutableCount int   // max unflushed memtables before writes block (0 = 5)
+	Compaction        compaction.Config
 }
 
 // DefaultOptions returns reasonable defaults.
 func DefaultOptions(dir string) Options {
 	return Options{
-		Dir:          dir,
-		MemtableSize: 64 * 1024 * 1024,
-		BlockSize:    4096,
-		Compaction:   compaction.DefaultConfig(),
+		Dir:               dir,
+		MemtableSize:      64 * 1024 * 1024,
+		BlockSize:         4096,
+		MaxImmutableCount: 5,
+		Compaction:        compaction.DefaultConfig(),
 	}
 }
 
@@ -55,6 +57,7 @@ type DB struct {
 	nextSeq   atomic.Uint64
 
 	flushCh   chan struct{}
+	flushDone *sync.Cond // signaled after each flush, wakes blocked writers
 	compactCh chan struct{}
 	closeCh   chan struct{}
 	wg        sync.WaitGroup
@@ -70,6 +73,10 @@ func Open(opts Options) (*DB, error) {
 		return nil, fmt.Errorf("db: cleanup temp files: %w", err)
 	}
 
+	if opts.MaxImmutableCount <= 0 {
+		opts.MaxImmutableCount = 5
+	}
+
 	db := &DB{
 		opts:      opts,
 		cache:     sstable.NewBlockCache(opts.BlockCacheSize),
@@ -78,6 +85,7 @@ func Open(opts Options) (*DB, error) {
 		closeCh:   make(chan struct{}),
 		levels:    make([][]*sstable.TableHandle, opts.Compaction.MaxLevels),
 	}
+	db.flushDone = sync.NewCond(&db.mu)
 
 	if err := db.recover(); err != nil {
 		return nil, fmt.Errorf("db: recovery: %w", err)
@@ -203,6 +211,11 @@ func (db *DB) newMemtable() error {
 // Close gracefully shuts down the engine.
 func (db *DB) Close() error {
 	close(db.closeCh)
+
+	// Wake any writers blocked on backpressure so they can
+	// observe the shutdown and return.
+	db.flushDone.Broadcast()
+
 	db.wg.Wait()
 
 	db.mu.Lock()
