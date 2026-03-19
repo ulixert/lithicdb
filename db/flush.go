@@ -79,7 +79,7 @@ func (db *DB) flushMemtable(mt *memtable.Memtable) error {
 		return fmt.Errorf("db: flush finish: %w", err)
 	}
 
-	reader, err := sstable.OpenReader(db.opts.Dir, id)
+	reader, err := sstable.OpenReader(db.opts.Dir, id, db.cache)
 	if err != nil {
 		return fmt.Errorf("db: open flushed SSTable: %w", err)
 	}

@@ -64,6 +64,7 @@ func (db *DB) runCompaction() {
 			db.opts.BlockSize,
 			int64(db.opts.Compaction.LevelSizeBase)/10,
 			&idAllocator{db: db},
+			db.cache,
 		)
 
 		// Unref inputs regardless of success/failure
