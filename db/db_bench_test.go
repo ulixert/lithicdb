@@ -206,3 +206,30 @@ func BenchmarkPut_WithFlush(b *testing.B) {
 		}
 	}
 }
+
+// --- Write batch benchmark ---
+
+func BenchmarkWriteBatch_100(b *testing.B) {
+	dir := b.TempDir()
+	d, err := Open(memtableOnlyOpts(dir))
+	if err != nil {
+		b.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+
+	val := make([]byte, 100)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		batch := d.NewWriteBatch()
+		for j := 0; j < 100; j++ {
+			key := fmt.Appendf(nil, "key-%016d-%04d", i, j)
+			batch.Put(key, val)
+		}
+		if err := batch.Commit(); err != nil {
+			b.Fatalf("Commit: %v", err)
+		}
+	}
+}
