@@ -23,4 +23,6 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Force the linter to use 1.24 semantics to bypass the compiler mismatch
+          args: --go=1.24
+
