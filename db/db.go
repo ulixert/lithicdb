@@ -55,6 +55,7 @@ type DB struct {
 	cache     *sstable.BlockCache
 	nextMemID atomic.Uint64
 	nextSeq   atomic.Uint64
+	snapshots snapshotRegistry
 
 	flushCh   chan struct{}
 	flushDone *sync.Cond // signaled after each flush, wakes blocked writers
@@ -211,6 +212,16 @@ func (db *DB) newMemtable() error {
 // currentSeq returns the latest sequence number that has been assigned.
 func (db *DB) currentSeq() uint64 {
 	return db.nextSeq.Load()
+}
+
+// GetSnapshot returns a point-in-time read view of the database.
+// The snapshot sees all writes that were completed before this call
+// and none that happen after. Callers must call Snapshot.Close() when
+// done to allow compaction to reclaim old versions.
+func (db *DB) GetSnapshot() *Snapshot {
+	seq := db.currentSeq()
+	db.snapshots.Register(seq)
+	return &Snapshot{db: db, seq: seq}
 }
 
 // Close gracefully shuts down the engine.
