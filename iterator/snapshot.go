@@ -6,85 +6,98 @@ import (
 	"github.com/ulixert/lithicdb/kv"
 )
 
-// SnapshotIterator wraps an iterator and filters it to a consistent
-// point-in-time view. It:
-//   - Skips entries with seq > maxSeq
-//   - Deduplicates: for each user key, yields only the newest visible version
-//   - Optionally skips tombstones (deleted keys invisible to the caller)
+// SnapshotIterator wraps a raw (all-versions) iterator and filters it
+// to produce the newest visible version of each user key, where
+// "visible" means seq <= maxSeq.
 //
-// The underlying iterator must yield internal keys in the standard order:
-// sorted by user key ascending, then by seq descending within each user key.
+// Given a raw merge iterator that emits entries in sorted order
+// (ascending user key, descending seq within the same user key),
+// this iterator:
+//  1. Skips entries with seq > maxSeq (invisible to this snapshot).
+//  2. Emits the first entry for each user key with seq <= maxSeq
+//     (the newest visible version).
+//  3. Skips remaining older visible versions of the same user key.
+//
+// Tombstones are emitted as-is - the caller decides how to handle them.
 type SnapshotIterator struct {
-	inner          Iterator
-	maxSeq         uint64
-	skipTombstones bool
-
-	// Track the last emitted user key for deduplication.
-	lastUserKey []byte
+	inner       Iterator
+	maxSeq      uint64
+	lastUserKey []byte // user key of the last emitted entry
+	valid       bool
+	err         error
 }
 
-// NewSnapshotIterator creates a filtered iterator that only sees versions
-// with seq <= maxSeq. If skipTombstones is true, deleted keys are skipped
-// entirely (used for Scan). If false, tombstones are visible (used for Get).
-func NewSnapshotIterator(inner Iterator, maxSeq uint64, skipTombstones bool) *SnapshotIterator {
+// NewSnapshotIterator creates a snapshot iterator that filters the
+// inner iterator to show only entries visible at the given sequence
+// number. The inner iterator must emit entries in global sorted order
+// (e.g., from a MergeIterator).
+func NewSnapshotIterator(inner Iterator, maxSeq uint64) *SnapshotIterator {
 	s := &SnapshotIterator{
-		inner:          inner,
-		maxSeq:         maxSeq,
-		skipTombstones: skipTombstones,
+		inner:  inner,
+		maxSeq: maxSeq,
 	}
 	s.advance()
 	return s
 }
 
-// advance moves to the next entry that passes all filters.
+// advance scans the inner iterator to find the next entry to emit.
 func (s *SnapshotIterator) advance() {
+	s.valid = false
+
 	for s.inner.IsValid() {
 		key := s.inner.Key()
-		seq := kv.SeqNum(key)
 		userKey := kv.UserKey(key)
+		seq := kv.SeqNum(key)
 
-		// Skip entries newer than our snapshot.
+		// Skip entries that are newer than this snapshot.
 		if seq > s.maxSeq {
 			s.inner.Next()
 			continue
 		}
 
-		// Skip duplicate user keys - we already emitted the newest
-		// visible version of this key.
+		// Skip older visible versions of a key we already emitted.
 		if s.lastUserKey != nil && bytes.Equal(userKey, s.lastUserKey) {
 			s.inner.Next()
 			continue
 		}
 
-		// If the newest visible version is a tombstone and tombstones
-		// should be hidden, mark this key as handled and continue.
-		if s.skipTombstones && s.inner.Value() == nil {
-			s.lastUserKey = append(s.lastUserKey[:0], userKey...)
-			s.inner.Next()
-			continue
-		}
-
-		// Found a valid entry. Stop here.
+		// Found the newest visible version of a new user key.
+		s.lastUserKey = append(s.lastUserKey[:0], userKey...)
+		s.valid = true
 		return
+	}
+
+	if err := s.inner.Err(); err != nil {
+		s.err = err
 	}
 }
 
-func (s *SnapshotIterator) Key() []byte   { return s.inner.Key() }
-func (s *SnapshotIterator) Value() []byte { return s.inner.Value() }
-func (s *SnapshotIterator) IsValid() bool { return s.inner.IsValid() }
-func (s *SnapshotIterator) Err() error    { return s.inner.Err() }
+func (s *SnapshotIterator) Key() []byte {
+	return s.inner.Key()
+}
+
+func (s *SnapshotIterator) Value() []byte {
+	return s.inner.Value()
+}
+
+func (s *SnapshotIterator) IsValid() bool {
+	return s.valid && s.err == nil
+}
 
 func (s *SnapshotIterator) Next() {
-	if !s.inner.IsValid() {
+	if !s.IsValid() {
 		return
 	}
-	// Record the current user key so we skip older versions of it.
-	userKey := kv.UserKey(s.inner.Key())
-	s.lastUserKey = append(s.lastUserKey[:0], userKey...)
 	s.inner.Next()
 	s.advance()
 }
 
+func (s *SnapshotIterator) Err() error {
+	return s.err
+}
+
 func (s *SnapshotIterator) Close() error {
+	s.valid = false
+	s.lastUserKey = nil
 	return s.inner.Close()
 }

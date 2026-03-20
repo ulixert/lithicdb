@@ -3,25 +3,22 @@ package iterator
 import (
 	"bytes"
 	"container/heap"
-
-	"github.com/ulixert/lithicdb/kv"
 )
 
 // MergeIterator merges multiple sorted iterators into a single sorted
-// stream, deduplicating on the user key. When multiple iterators (or
-// multiple versions within the same iterator) have the same user key,
-// the entry with the smallest internal key wins - which is the newest
-// version from the highest-priority iterator.
+// stream. It emits ALL versions of all keys in global sorted order
+// (ascending user key, then descending sequence number within the same
+// user key). No deduplication is performed - the caller is responsible
+// for version selection (see SnapshotIterator).
 //
-// This handles two deduplication cases:
-// 1. The same user key across different iterators (e.g., memtable vs. SSTable)
-// 2. The same user key within one iterator (e.g., multiple versions in a memtable)
+// Iterators at lower indices have higher priority when two entries have
+// byte-identical internal keys (defensive tiebreaker only - in practice,
+// different sequence numbers make internal keys unique).
 type MergeIterator struct {
-	iters       []Iterator
-	h           mergeHeap
-	cur         heapItem
-	lastUserKey []byte // user key of the last emitted entry, for dedup
-	err         error
+	iters []Iterator
+	h     mergeHeap
+	cur   heapItem
+	err   error
 }
 
 type heapItem struct {
@@ -54,45 +51,13 @@ func NewMergeIterator(iters []Iterator) *MergeIterator {
 	return m
 }
 
-// advance pops the smallest key from the heap, sets it as current,
-// then skips any entries with the same user key - both from other
-// iterators on the heap AND from older versions within the same
-// iterator. Continues until it finds an entry with a different
-// user key from the last emitted one (or the heap is exhausted).
+// advance pops the smallest key from the heap and sets it as current.
 func (m *MergeIterator) advance() {
-	for {
-		if len(m.h) == 0 {
-			m.cur = heapItem{}
-			return
-		}
-
-		m.cur = heap.Pop(&m.h).(heapItem)
-
-		// Drain all heap entries with the same user key
-		for len(m.h) > 0 && kv.SameUserKey(m.h[0].key, m.cur.key) {
-			dup := heap.Pop(&m.h).(heapItem)
-			m.pushNext(dup.idx)
-			if m.err != nil {
-				return
-			}
-		}
-
-		// If this entry has the same user key as what we last emitted,
-		// skip it - it's an older version from the same iterator that
-		// got pushed after the previous advance.
-		curUserKey := kv.UserKey(m.cur.key)
-		if m.lastUserKey != nil && bytes.Equal(curUserKey, m.lastUserKey) {
-			m.pushNext(m.cur.idx)
-			if m.err != nil {
-				return
-			}
-			continue // loop to find the next different user key
-		}
-
-		// Found a new user key - record it and return
-		m.lastUserKey = append(m.lastUserKey[:0], curUserKey...)
+	if len(m.h) == 0 {
+		m.cur = heapItem{}
 		return
 	}
+	m.cur = heap.Pop(&m.h).(heapItem)
 }
 
 // pushNext advances the iterator at the given index and pushes
@@ -150,7 +115,6 @@ func (m *MergeIterator) Close() error {
 	}
 	m.cur = heapItem{}
 	m.h = nil
-	m.lastUserKey = nil
 	return firstErr
 }
 
@@ -170,9 +134,7 @@ func (h mergeHeap) Less(i, j int) bool {
 	// With sequence numbers in the key encoding, two entries from
 	// different iterators should never have byte-identical internal
 	// keys (same user key → different seq → different bytes).
-	// This tiebreaker is a defensive fallback for deterministic
-	// ordering, not the mechanism for correctness. The actual
-	// deduplication happens in advance() via kv.SameUserKey.
+	// This tiebreaker is a defensive fallback for deterministic ordering.
 	return h[i].idx < h[j].idx
 }
 
