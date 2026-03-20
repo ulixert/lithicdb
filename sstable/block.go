@@ -325,6 +325,44 @@ func (b *Block) Get(userKey []byte) (kv.Value, bool, error) {
 	return value, true, nil
 }
 
+// GetAt searches for the newest version of a user key with seq <= maxSeq.
+// This enables point-in-time lookups within a block.
+func (b *Block) GetAt(userKey []byte, maxSeq uint64) (kv.Value, bool, error) {
+	searchKey := kv.MakeSearchKey(userKey)
+
+	// Binary search: find the first entry >= searchKey
+	low, high := 0, b.numEntries
+	for low < high {
+		mid := low + (high-low)/2
+		key, _, err := b.readEntry(mid)
+		if err != nil {
+			return kv.Value{}, false, err
+		}
+		if bytes.Compare(key, searchKey) < 0 {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+
+	// Walk forward through entries with the same user key,
+	// looking for the first one with seq <= maxSeq.
+	for i := low; i < b.numEntries; i++ {
+		key, value, err := b.readEntry(i)
+		if err != nil {
+			return kv.Value{}, false, err
+		}
+		if !bytes.Equal(kv.UserKey(key), userKey) {
+			break // moved past this user key
+		}
+		if kv.SeqNum(key) <= maxSeq {
+			return value, true, nil
+		}
+	}
+
+	return kv.Value{}, false, nil
+}
+
 // FirstKey returns the first (smallest) key in the block.
 func (b *Block) FirstKey() ([]byte, error) {
 	key, _, err := b.readEntry(0)

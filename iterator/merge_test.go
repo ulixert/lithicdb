@@ -44,7 +44,11 @@ func TestMergeIterator_SingleIterator(t *testing.T) {
 	})
 	defer it.Close()
 
-	assertUserKeys(t, it, []string{"a", "b", "c"})
+	assertEntries(t, it, []expectedEntry{
+		{userKey: "a", seq: 1, value: "1"},
+		{userKey: "b", seq: 2, value: "2"},
+		{userKey: "c", seq: 3, value: "3"},
+	})
 }
 
 func TestMergeIterator_TwoIterators_NoOverlap(t *testing.T) {
@@ -60,11 +64,16 @@ func TestMergeIterator_TwoIterators_NoOverlap(t *testing.T) {
 	})
 	defer it.Close()
 
-	assertUserKeys(t, it, []string{"a", "b", "c", "d"})
+	assertEntries(t, it, []expectedEntry{
+		{userKey: "a", seq: 3, value: "1"},
+		{userKey: "b", seq: 1, value: "2"},
+		{userKey: "c", seq: 4, value: "3"},
+		{userKey: "d", seq: 2, value: "4"},
+	})
 }
 
-func TestMergeIterator_DuplicateKeys_NewestWins(t *testing.T) {
-	// iters[0] has higher priority AND newer seq for "b"
+func TestMergeIterator_DuplicateKeys_AllVersionsEmitted(t *testing.T) {
+	// Both iterators have "b" — raw merge emits both versions
 	it := NewMergeIterator([]Iterator{
 		newSliceIterator([]sliceEntry{
 			{key: ikey("a", 10), value: []byte("new-a")},
@@ -77,16 +86,16 @@ func TestMergeIterator_DuplicateKeys_NewestWins(t *testing.T) {
 	})
 	defer it.Close()
 
-	assertMergeEntries(t, it, []mergeExpected{
-		{userKey: "a", value: "new-a"},
-		{userKey: "b", value: "new-b"},
-		{userKey: "c", value: "old-c"},
+	assertEntries(t, it, []expectedEntry{
+		{userKey: "a", seq: 10, value: "new-a"},
+		{userKey: "b", seq: 9, value: "new-b"},
+		{userKey: "b", seq: 5, value: "old-b"},
+		{userKey: "c", seq: 3, value: "old-c"},
 	})
 }
 
 func TestMergeIterator_SameUserKey_MultipleVersions(t *testing.T) {
-	// Three iterators all have "a" — only the one from iters[0]
-	// (highest priority) should appear
+	// Three iterators all have "a" — raw merge emits all three versions
 	it := NewMergeIterator([]Iterator{
 		newSliceIterator([]sliceEntry{
 			{key: ikey("a", 30), value: []byte("newest")},
@@ -103,10 +112,13 @@ func TestMergeIterator_SameUserKey_MultipleVersions(t *testing.T) {
 	})
 	defer it.Close()
 
-	assertMergeEntries(t, it, []mergeExpected{
-		{userKey: "a", value: "newest"},
-		{userKey: "b", value: "middle-b"},
-		{userKey: "c", value: "oldest-c"},
+	assertEntries(t, it, []expectedEntry{
+		{userKey: "a", seq: 30, value: "newest"},
+		{userKey: "a", seq: 20, value: "middle"},
+		{userKey: "a", seq: 10, value: "oldest"},
+		{userKey: "b", seq: 15, value: "middle-b"},
+		{userKey: "b", seq: 5, value: "oldest-b"},
+		{userKey: "c", seq: 1, value: "oldest-c"},
 	})
 }
 
@@ -140,10 +152,13 @@ func TestMergeIterator_OneEmptyOneNot(t *testing.T) {
 	})
 	defer it.Close()
 
-	assertUserKeys(t, it, []string{"a"})
+	assertEntries(t, it, []expectedEntry{
+		{userKey: "a", seq: 1, value: "1"},
+	})
 }
 
-func TestMergeIterator_ManyDuplicatesOfSameKey(t *testing.T) {
+func TestMergeIterator_ManyVersionsOfSameKey(t *testing.T) {
+	// 10 iterators, each with one version of "same" — all emitted
 	iters := make([]Iterator, 10)
 	for i := 0; i < 10; i++ {
 		iters[i] = newSliceIterator([]sliceEntry{
@@ -154,21 +169,17 @@ func TestMergeIterator_ManyDuplicatesOfSameKey(t *testing.T) {
 	it := NewMergeIterator(iters)
 	defer it.Close()
 
-	if !it.IsValid() {
-		t.Fatal("expected valid")
+	count := 0
+	for it.IsValid() {
+		gotUser := string(kv.UserKey(it.Key()))
+		if gotUser != "same" {
+			t.Errorf("entry %d: user key = %q, want %q", count, gotUser, "same")
+		}
+		count++
+		it.Next()
 	}
-
-	gotUser := string(kv.UserKey(it.Key()))
-	if gotUser != "same" {
-		t.Errorf("user key = %q, want %q", gotUser, "same")
-	}
-	if string(it.Value()) != "0" {
-		t.Errorf("value = %q, want %q", it.Value(), "0")
-	}
-
-	it.Next()
-	if it.IsValid() {
-		t.Error("expected exhausted after one user key")
+	if count != 10 {
+		t.Errorf("got %d entries, want 10", count)
 	}
 }
 
@@ -187,9 +198,8 @@ func TestMergeIterator_CloseClosesAll(t *testing.T) {
 }
 
 func TestMergeIterator_MultipleVersionsInSameIterator(t *testing.T) {
-	// A single memtable iterator might have multiple versions of the
-	// same user key (different seq numbers). The merge iterator should
-	// only emit the newest (first in sort order).
+	// A single memtable iterator with multiple versions of the same
+	// user key — raw merge emits all of them in order.
 	it := NewMergeIterator([]Iterator{
 		newSliceIterator([]sliceEntry{
 			{key: ikey("a", 3), value: []byte("v3")},
@@ -200,20 +210,23 @@ func TestMergeIterator_MultipleVersionsInSameIterator(t *testing.T) {
 	})
 	defer it.Close()
 
-	assertMergeEntries(t, it, []mergeExpected{
-		{userKey: "a", value: "v3"},
-		{userKey: "b", value: "b-val"},
+	assertEntries(t, it, []expectedEntry{
+		{userKey: "a", seq: 3, value: "v3"},
+		{userKey: "a", seq: 2, value: "v2"},
+		{userKey: "a", seq: 1, value: "v1"},
+		{userKey: "b", seq: 4, value: "b-val"},
 	})
 }
 
 // --- helpers ---
 
-type mergeExpected struct {
+type expectedEntry struct {
 	userKey string
+	seq     uint64
 	value   string
 }
 
-func assertMergeEntries(t *testing.T, it *MergeIterator, expected []mergeExpected) {
+func assertEntries(t *testing.T, it *MergeIterator, expected []expectedEntry) {
 	t.Helper()
 
 	for i, want := range expected {
@@ -226,6 +239,11 @@ func assertMergeEntries(t *testing.T, it *MergeIterator, expected []mergeExpecte
 			t.Errorf("entry %d: user key = %q, want %q", i, gotUser, want.userKey)
 		}
 
+		gotSeq := kv.SeqNum(it.Key())
+		if gotSeq != want.seq {
+			t.Errorf("entry %d: seq = %d, want %d", i, gotSeq, want.seq)
+		}
+
 		gotVal := string(it.Value())
 		if gotVal != want.value {
 			t.Errorf("entry %d: value = %q, want %q", i, gotVal, want.value)
@@ -235,27 +253,7 @@ func assertMergeEntries(t *testing.T, it *MergeIterator, expected []mergeExpecte
 	}
 
 	if it.IsValid() {
-		t.Errorf("iterator not exhausted: extra key %q", kv.UserKey(it.Key()))
-	}
-}
-
-func assertUserKeys(t *testing.T, it *MergeIterator, expected []string) {
-	t.Helper()
-
-	for i, want := range expected {
-		if !it.IsValid() {
-			t.Fatalf("entry %d: iterator exhausted early", i)
-		}
-
-		got := string(kv.UserKey(it.Key()))
-		if got != want {
-			t.Errorf("entry %d: user key = %q, want %q", i, got, want)
-		}
-
-		it.Next()
-	}
-
-	if it.IsValid() {
-		t.Errorf("iterator not exhausted: extra key %q", kv.UserKey(it.Key()))
+		t.Errorf("iterator not exhausted: extra key %q (seq %d)",
+			kv.UserKey(it.Key()), kv.SeqNum(it.Key()))
 	}
 }

@@ -208,6 +208,55 @@ func (r *Reader) Get(userKey []byte) (value kv.Value, found bool, err error) {
 	return block.Get(userKey)
 }
 
+// GetAt looks up the newest version of a user key with seq <= maxSeq.
+// This enables snapshot reads through SSTables.
+//
+// A user key's versions may span multiple blocks (e.g., the newest
+// versions fill the end of block N, and older versions spill into
+// block N+1). If the first block contains only versions with seq >
+// maxSeq, we continue to the next block.
+func (r *Reader) GetAt(userKey []byte, maxSeq uint64) (value kv.Value, found bool, err error) {
+	if !r.MayContain(userKey) {
+		return kv.Value{}, false, nil
+	}
+
+	searchKey := kv.MakeSearchKey(userKey)
+	blockIdx := r.findBlock(searchKey)
+	if blockIdx < 0 {
+		return kv.Value{}, false, nil
+	}
+
+	for blockIdx < len(r.metas) {
+		block, err := r.readBlock(blockIdx)
+		if err != nil {
+			return kv.Value{}, false, err
+		}
+
+		val, found, err := block.GetAt(userKey, maxSeq)
+		if err != nil {
+			return kv.Value{}, false, err
+		}
+		if found {
+			return val, true, nil
+		}
+
+		// Check if the block's last entry still has our user key.
+		// If so, older versions may continue in the next block.
+		lastKey, err := block.LastKey()
+		if err != nil {
+			return kv.Value{}, false, err
+		}
+		if !bytes.Equal(kv.UserKey(lastKey), userKey) {
+			// The user key ended within this block - no match.
+			return kv.Value{}, false, nil
+		}
+
+		blockIdx++
+	}
+
+	return kv.Value{}, false, nil
+}
+
 // findBlock returns the index of the block that might contain the key,
 // or -1 if the key is outside the SSTable's range.
 //
