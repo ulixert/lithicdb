@@ -208,6 +208,11 @@ func (db *DB) newMemtable() error {
 	return nil
 }
 
+// currentSeq returns the latest sequence number that has been assigned.
+func (db *DB) currentSeq() uint64 {
+	return db.nextSeq.Load()
+}
+
 // Close gracefully shuts down the engine.
 func (db *DB) Close() error {
 	close(db.closeCh)

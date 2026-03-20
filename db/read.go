@@ -10,6 +10,29 @@ import (
 // Returns the value and true if found. If the key has been
 // deleted, returns a tombstone value with found=true.
 func (db *DB) Get(key []byte) (kv.Value, bool) {
+	return db.getAt(key, db.currentSeq())
+}
+
+// Scan returns an iterator over all entries in sorted key order.
+//
+// The iterator reads from in-memory data (Readers load the full file
+// into memory), so it does not need to hold TableHandle references.
+// If the Reader switches to mmap, iterators would need to Ref/Unref.
+//
+// Returns internal keys. The caller must call Close().
+func (db *DB) Scan() iterator.Iterator {
+	return iterator.NewSnapshotIterator(db.rawScan(), db.currentSeq())
+}
+
+// ScanRange returns an iterator over entries whose user key is in
+// [start, end). The caller must call Close().
+func (db *DB) ScanRange(start, end []byte) iterator.Iterator {
+	return iterator.NewSnapshotIterator(db.rawScanRange(start, end), db.currentSeq())
+}
+
+// getAt performs a point lookup for the newest version of a user key
+// with seq <= maxSeq. Searches: active → immutables → L0 → L1+.
+func (db *DB) getAt(key []byte, maxSeq uint64) (kv.Value, bool) {
 	db.mu.RLock()
 	active := db.active
 	immutables := db.immutables
@@ -18,13 +41,13 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 	db.mu.RUnlock()
 
 	// Active memtable
-	if val, found := active.Get(key); found {
+	if val, found := active.GetAt(key, maxSeq); found {
 		return val, true
 	}
 
 	// Immutable memtables (newest first)
 	for _, mt := range immutables {
-		if val, found := mt.Get(key); found {
+		if val, found := mt.GetAt(key, maxSeq); found {
 			return val, true
 		}
 	}
@@ -34,7 +57,7 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 		if !h.Reader.MayContain(key) {
 			continue
 		}
-		val, found, err := h.Reader.Get(key)
+		val, found, err := h.Reader.GetAt(key, maxSeq)
 		if err != nil {
 			// Skip this SSTable rather than failing the entire read.
 			// TODO: add error logging and metrics
@@ -52,7 +75,7 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 				if !h.Reader.MayContain(key) {
 					continue
 				}
-				val, found, err := h.Reader.Get(key)
+				val, found, err := h.Reader.GetAt(key, maxSeq)
 				if err != nil {
 					continue
 				}
@@ -66,14 +89,10 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 	return kv.Value{}, false
 }
 
-// Scan returns an iterator over all entries in sorted key order.
-//
-// The iterator reads from in-memory data (Readers load the full file
-// into memory), so it does not need to hold TableHandle references.
-// If the Reader switches to mmap, iterators would need to Ref/Unref.
-//
-// Returns internal keys. The caller must call Close().
-func (db *DB) Scan() iterator.Iterator {
+// rawScan collects all-version iterators from every level and returns
+// a raw MergeIterator that emits ALL versions in sorted order.
+// The caller wraps this with a SnapshotIterator for version selection.
+func (db *DB) rawScan() iterator.Iterator {
 	db.mu.RLock()
 	active := db.active
 	immutables := db.immutables
@@ -101,9 +120,9 @@ func (db *DB) Scan() iterator.Iterator {
 	return iterator.NewMergeIterator(iters)
 }
 
-// ScanRange returns an iterator over entries whose user key is in
-// [start, end). The caller must call Close().
-func (db *DB) ScanRange(start, end []byte) iterator.Iterator {
+// rawScanRange collects all-version iterators with key bounds and
+// returns a raw MergeIterator.
+func (db *DB) rawScanRange(start, end []byte) iterator.Iterator {
 	db.mu.RLock()
 	active := db.active
 	immutables := db.immutables
