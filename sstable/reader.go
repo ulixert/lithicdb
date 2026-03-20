@@ -208,6 +208,27 @@ func (r *Reader) Get(userKey []byte) (value kv.Value, found bool, err error) {
 	return block.Get(userKey)
 }
 
+// GetAt looks up the newest version of a user key with seq <= maxSeq.
+// This enables snapshot reads through SSTables.
+func (r *Reader) GetAt(userKey []byte, maxSeq uint64) (value kv.Value, found bool, err error) {
+	if !r.MayContain(userKey) {
+		return kv.Value{}, false, nil
+	}
+
+	searchKey := kv.MakeSearchKey(userKey)
+	blockIdx := r.findBlock(searchKey)
+	if blockIdx < 0 {
+		return kv.Value{}, false, nil
+	}
+
+	block, err := r.readBlock(blockIdx)
+	if err != nil {
+		return kv.Value{}, false, err
+	}
+
+	return block.GetAt(userKey, maxSeq)
+}
+
 // findBlock returns the index of the block that might contain the key,
 // or -1 if the key is outside the SSTable's range.
 //
