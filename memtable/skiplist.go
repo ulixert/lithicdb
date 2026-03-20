@@ -126,6 +126,25 @@ func (s *SkipList) Get(userKey []byte) (kv.Value, bool) {
 	return kv.Value{}, false
 }
 
+// GetAt finds the newest version of a user key with seq <= maxSeq.
+// This enables point-in-time reads: by passing a snapshot's sequence
+// number, only versions visible to that snapshot are considered.
+func (s *SkipList) GetAt(userKey []byte, maxSeq uint64) (kv.Value, bool) {
+	searchKey := kv.MakeSearchKey(userKey)
+	node := s.findGreaterOrEqual(searchKey, nil)
+
+	// Walk forward through versions of this user key (newest first
+	// due to inverted seq ordering) until we find one with seq <= maxSeq.
+	for node != nil && bytes.Equal(kv.UserKey(node.key), userKey) {
+		if kv.SeqNum(node.key) <= maxSeq {
+			return node.value, true
+		}
+		node = node.next[0]
+	}
+
+	return kv.Value{}, false
+}
+
 // Len returns the number of entries in the skip list.
 func (s *SkipList) Len() int {
 	return s.size

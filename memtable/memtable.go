@@ -59,6 +59,14 @@ func (m *Memtable) Get(userKey []byte) (kv.Value, bool) {
 	return m.sl.Get(userKey)
 }
 
+// GetAt returns the newest version of a user key with seq <= maxSeq.
+// This enables snapshot reads at a specific point in time.
+func (m *Memtable) GetAt(userKey []byte, maxSeq uint64) (kv.Value, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sl.GetAt(userKey, maxSeq)
+}
+
 // Scan returns an iterator over all entries in internal key order.
 //
 // The returned iterator holds a read lock on the memtable.
