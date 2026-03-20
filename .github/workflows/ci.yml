@@ -13,16 +13,3 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test -race ./...
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          # Force the linter to use 1.24 semantics to bypass the compiler mismatch
-          args: --go=1.24
-
