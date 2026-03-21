@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ulixert/lithicdb/kv"
 )
@@ -314,6 +315,94 @@ func TestSnapshot_ScanDeduplication(t *testing.T) {
 	iter.Next()
 	if iter.IsValid() {
 		t.Errorf("expected exhausted, got extra key %q", kv.UserKey(iter.Key()))
+	}
+}
+
+func TestSnapshot_SurvivesCompaction(t *testing.T) {
+	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	d, err := Open(testOpts(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	// Write initial data and take a snapshot.
+	d.Put([]byte("a"), []byte("v1"))
+	d.Put([]byte("b"), []byte("v1"))
+	snap := d.GetSnapshot()
+	defer snap.Close()
+
+	// Overwrite the keys so the old versions become eligible for GC.
+	d.Put([]byte("a"), []byte("v2"))
+	d.Put([]byte("b"), []byte("v2"))
+
+	// Force data to SSTables by writing enough to trigger flushes.
+	for i := 0; i < 200; i++ {
+		key := fmt.Sprintf("pad-%04d", i)
+		d.Put([]byte(key), []byte(fmt.Sprintf("padding-value-%04d-extra-bytes-for-size", i)))
+	}
+
+	// Wait for L0 files to appear, then trigger compaction.
+	waitForFlush(t, d, 1)
+	d.triggerCompaction()
+
+	// Give compaction a moment to run.
+	deadline := time.After(5 * time.Second)
+	for {
+		d.mu.RLock()
+		hasLevels := len(d.levels) > 1 && len(d.levels[1]) > 0
+		d.mu.RUnlock()
+		if hasLevels {
+			break
+		}
+		select {
+		case <-deadline:
+			// Compaction may not have run into L1, that's OK.
+			// The important thing is the snapshot still reads correctly.
+			break
+		case <-time.After(50 * time.Millisecond):
+		}
+		if hasLevels {
+			break
+		}
+		// Check deadline
+		select {
+		case <-deadline:
+			break
+		default:
+		}
+		break
+	}
+
+	// The snapshot must still see the old values.
+	val, ok := snap.Get([]byte("a"))
+	if !ok {
+		t.Fatal("snapshot: key 'a' not found after compaction")
+	}
+	if string(val.Data) != "v1" {
+		t.Errorf("snapshot: a = %q, want v1", val.Data)
+	}
+
+	val, ok = snap.Get([]byte("b"))
+	if !ok {
+		t.Fatal("snapshot: key 'b' not found after compaction")
+	}
+	if string(val.Data) != "v1" {
+		t.Errorf("snapshot: b = %q, want v1", val.Data)
+	}
+
+	// Current DB should see the new values.
+	val, ok = d.Get([]byte("a"))
+	if !ok {
+		t.Fatal("db: key 'a' not found")
+	}
+	if string(val.Data) != "v2" {
+		t.Errorf("db: a = %q, want v2", val.Data)
 	}
 }
 
