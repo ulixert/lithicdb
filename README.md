@@ -2,7 +2,7 @@
 
 A distributed LSM-tree key-value storage engine built from scratch in Go.
 
-LithicDB is a from-scratch implementation of a log-structured merge-tree storage engine. Every core component — skip list memtable, write-ahead log, SSTable with bloom filters, merge iterator, leveled compaction, MVCC transactions — is built by hand, not imported. The engine is designed to scale from a single-node embedded store to a distributed, sharded cluster over gRPC.
+LithicDB is a from-scratch implementation of a log-structured merge-tree storage engine. Every core component — skip list memtable, write-ahead log, SSTable with bloom filters, merge iterator, leveled compaction, snapshot isolation, optimistic transactions — is built by hand, not imported. The engine is designed to scale from a single-node embedded store to a distributed, sharded cluster over gRPC.
 
 > "Lithic" comes from the Greek *lithos*, meaning stone. Writes arrive in layers, then compact over time into deeper, denser structures on disk — like sediment becoming rock.
 
@@ -28,6 +28,7 @@ func main() {
     }
     defer d.Close()
 
+    // Basic operations
     d.Put([]byte("hello"), []byte("world"))
 
     val, found := d.Get([]byte("hello"))
@@ -35,6 +36,20 @@ func main() {
 
     d.Delete([]byte("hello"))
 
+    // Point-in-time snapshots
+    snap := d.GetSnapshot()
+    defer snap.Close()
+    val, found = snap.Get([]byte("hello")) // reads at snapshot time
+
+    // Optimistic transactions
+    tx := d.BeginTransaction()
+    v, _ := tx.Get([]byte("counter"))
+    tx.Put([]byte("counter"), append(v.Data, []byte("+1")...))
+    if err := tx.Commit(); err == db.ErrConflict {
+        // another writer modified "counter" — retry
+    }
+
+    // Iteration
     iter := d.Scan()
     defer iter.Close()
     for iter.IsValid() {
@@ -128,8 +143,12 @@ Measured on Apple M1, 4KB blocks, 8MB block cache, leveled compaction.
 | Get — SSTable hit (warm cache) | 843K ops/sec | 1,187 |
 | Get — SSTable miss | 683K ops/sec | 1,463 |
 | Scan (10K keys) | 547 scans/sec | 1.8M |
+| **MVCC** | | |
+| Snapshot Get | 3.0M ops/sec | 334 |
+| Snapshot Scan (1K keys) | 10K scans/sec | 99,485 |
+| Transaction (5 reads + 5 writes) | 259 txns/sec | 3.9M |
 
-Get miss is slower than hit because it must check bloom filters on every SSTable across all levels before returning "not found." Cache hit ≈ cold hit because the Reader loads the full file into memory — the cache saves CRC32 + decode but adds hash + mutex overhead. The cache will matter more with `mmap` or lazy reads.
+Snapshot Get is fast because `GetAt` uses the same skip list seek as regular Get — the only extra cost is comparing the sequence number. Transaction throughput is WAL-bound: each commit does one `fsync`. The conflict check (scanning active + immutable memtables) is negligible.
 
 📊 **[Full benchmark analysis](BENCHMARKS.md)**
 ## Features
@@ -140,7 +159,7 @@ Get miss is slower than hit because it must check bloom filters on every SSTable
 - [x] SSTable format: ~4KB blocks, per-block checksums, offset tables for binary search
 - [x] Bloom filters (10 bits/key, ~1% false positive rate, LevelDB-style)
 - [x] Internal key encoding (`user_key + inverted_seq`) for MVCC-ready ordering via plain `bytes.Compare`
-- [x] Merge iterator: fan-out min-heap, user-key deduplication across and within sources
+- [x] Merge iterator: fan-out min-heap, emits all versions in global sorted order
 - [x] Background flush with atomic SSTable writes (write → fsync → rename → fsync dir)
 - [x] Crash recovery via WAL replay with sequence number restoration
 - [x] Tombstone support with explicit typed flags
@@ -154,9 +173,11 @@ Get miss is slower than hit because it must check bloom filters on every SSTable
 - [x] Write backpressure (block when flush can't keep up)
 
 ### MVCC & Transactions
-- [ ] Snapshot isolation (`db.GetSnapshot()` for point-in-time reads)
-- [ ] Optimistic transactions with write-write conflict detection
-- [ ] MVCC-aware compaction (respect active snapshots during GC)
+- [x] Snapshot isolation (`db.GetSnapshot()` for point-in-time reads)
+- [x] Optimistic transactions with write-write conflict detection
+- [x] MVCC-aware compaction (respect active snapshots during version GC)
+- [x] Snapshot iterator (seq filtering + user-key dedup, layered on raw merge)
+- [x] Version-aware point lookups (`GetAt`) through entire read stack
 
 ### Distributed Layer
 - [ ] gRPC service (Put, Get, Delete, Scan, BatchWrite)
@@ -177,12 +198,13 @@ Get miss is slower than hit because it must check bloom filters on every SSTable
 
 ```
 lithicdb/
-  db/              engine: Put, Get, Delete, Scan, flush, recovery, compaction
-  compaction/      picker, executor, level state
-  iterator/        Iterator interface, MergeIterator
+  db/              engine: Put, Get, Delete, Scan, flush, recovery, compaction,
+                   snapshots, transactions, MVCC-aware version GC
+  compaction/      picker, executor (with watermark-based version GC), level state
+  iterator/        Iterator interface, MergeIterator, SnapshotIterator, WriteBufferIterator
   kv/              Value type, internal key encoding (user_key + seq)
   manifest/        LSM state persistence: SSTable tracking, ID counters
-  memtable/        skip list (from scratch), thread-safe wrapper
+  memtable/        skip list (from scratch), thread-safe wrapper, GetAt/GetNewest
   sstable/         block encoding, bloom filter, SSTable builder/reader, block cache
   wal/             write-ahead log: encoding, writing, crash recovery
 ```
