@@ -54,6 +54,12 @@ type CompactionTask struct {
 	// KeyRange is the union key range of all inputs.
 	MinKey []byte
 	MaxKey []byte
+
+	// IsBottommost is true when no data exists below OutputLevel.
+	// When true, tombstones with seq < watermark can be safely
+	// dropped because there are no older versions in lower levels
+	// that they need to shadow.
+	IsBottommost bool
 }
 
 // AllInputs returns all handles involved in this compaction
