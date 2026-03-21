@@ -83,17 +83,28 @@ func (b *WriteBatch) Commit() error {
 	b.db.mu.Lock()
 	defer b.db.mu.Unlock()
 
-	b.db.waitForFlushSpace()
+	if err := b.db.applyBatchLocked(b.ops); err != nil {
+		return err
+	}
+
+	b.Reset()
+
+	return nil
+}
+
+// applyBatchLocked writes a slice of operations to the WAL and memtable.
+// The caller must hold db.mu. Each operation gets its own sequence number
+// from a contiguous range, so within a batch, later operations on the
+// same key win (correct for Put("a","1") then Delete("a")).
+func (db *DB) applyBatchLocked(ops []batchOp) error {
+	db.waitForFlushSpace()
 
 	// Assign a contiguous range of sequence numbers.
-	// Each operation gets its own seq so that within the batch,
-	// later operations on the same key win (correct for
-	// Put("a","1") then Delete("a") in the same batch).
-	baseSeq := b.db.nextSeq.Add(uint64(len(b.ops))) - uint64(len(b.ops)) + 1
+	baseSeq := db.nextSeq.Add(uint64(len(ops))) - uint64(len(ops)) + 1
 
 	// Build WAL entries
-	walEntries := make([]wal.Entry, len(b.ops))
-	for i, op := range b.ops {
+	walEntries := make([]wal.Entry, len(ops))
+	for i, op := range ops {
 		seq := baseSeq + uint64(i)
 		if op.tombstone {
 			walEntries[i] = wal.Entry{
@@ -111,30 +122,28 @@ func (b *WriteBatch) Commit() error {
 	}
 
 	// Single WAL write + fsync - atomic on disk
-	if err := b.db.activeWAL.WriteEntries(walEntries); err != nil {
+	if err := db.activeWAL.WriteEntries(walEntries); err != nil {
 		return fmt.Errorf("db: batch WAL write: %w", err)
 	}
 
 	// Apply to memtable (all operations, same order)
-	for i, op := range b.ops {
+	for i, op := range ops {
 		seq := baseSeq + uint64(i)
 		ikey := kv.MakeInternalKey(op.key, seq)
 
 		if op.tombstone {
-			b.db.active.Put(ikey, kv.NewTombstone())
+			db.active.Put(ikey, kv.NewTombstone())
 		} else {
-			b.db.active.Put(ikey, kv.NewValue(op.value))
+			db.active.Put(ikey, kv.NewValue(op.value))
 		}
 	}
 
 	// Check if the memtable needs rotation
-	if b.db.active.ApproximateSize() >= b.db.opts.MemtableSize {
-		if err := b.db.rotateMemtable(); err != nil {
+	if db.active.ApproximateSize() >= db.opts.MemtableSize {
+		if err := db.rotateMemtable(); err != nil {
 			return err
 		}
 	}
-
-	b.Reset()
 
 	return nil
 }
