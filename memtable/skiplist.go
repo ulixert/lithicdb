@@ -126,6 +126,21 @@ func (s *SkipList) Get(userKey []byte) (kv.Value, bool) {
 	return kv.Value{}, false
 }
 
+// GetNewest finds the newest version of a user key and also returns
+// its sequence number. This is used for conflict detection in
+// optimistic transactions: if the returned seq is greater than the
+// transaction's snapshot seq, a write-write conflict has occurred.
+func (s *SkipList) GetNewest(userKey []byte) (kv.Value, uint64, bool) {
+	searchKey := kv.MakeSearchKey(userKey)
+	found := s.findGreaterOrEqual(searchKey, nil)
+
+	if found != nil && bytes.Equal(kv.UserKey(found.key), userKey) {
+		return found.value, kv.SeqNum(found.key), true
+	}
+
+	return kv.Value{}, 0, false
+}
+
 // GetAt finds the newest version of a user key with seq <= maxSeq.
 // This enables point-in-time reads: by passing a snapshot's sequence
 // number, only versions visible to that snapshot are considered.

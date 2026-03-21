@@ -59,6 +59,14 @@ func (m *Memtable) Get(userKey []byte) (kv.Value, bool) {
 	return m.sl.Get(userKey)
 }
 
+// GetNewest returns the newest version of a user key along with its
+// sequence number. Used for write-write conflict detection in transactions.
+func (m *Memtable) GetNewest(userKey []byte) (kv.Value, uint64, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sl.GetNewest(userKey)
+}
+
 // GetAt returns the newest version of a user key with seq <= maxSeq.
 // This enables snapshot reads at a specific point in time.
 func (m *Memtable) GetAt(userKey []byte, maxSeq uint64) (kv.Value, bool) {

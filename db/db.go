@@ -110,7 +110,7 @@ func Open(opts Options) (*DB, error) {
 // Recovery order:
 // 1. Open manifest (or create if first startup) → get SSTable list + IDs
 // 2. Open all SSTables listed in the manifest
-// 3. Replay WAL files → rebuild unflushed memtable state
+// 3. Replay WAL files → rebuild the unflushed memtable state
 // 4. Reconcile: max(manifest IDs, WAL IDs) → set nextMemID, nextSeq
 func (db *DB) recover() error {
 	var state *manifest.State
@@ -222,6 +222,18 @@ func (db *DB) GetSnapshot() *Snapshot {
 	seq := db.currentSeq()
 	db.snapshots.Register(seq)
 	return &Snapshot{db: db, seq: seq}
+}
+
+// BeginTransaction starts an optimistic transaction. The transaction
+// reads from a snapshot taken at this point in time. Writes are
+// buffered locally until Commit, which checks for write-write
+// conflicts and applies them atomically.
+func (db *DB) BeginTransaction() *Transaction {
+	return &Transaction{
+		db:       db,
+		snapshot: db.GetSnapshot(),
+		writes:   make(map[string]txWrite),
+	}
 }
 
 // Close gracefully shuts down the engine.
