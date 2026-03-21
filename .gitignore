@@ -41,13 +41,9 @@ go.work.sum
 *.swo
 *.iml
 .DS_Store
-.notes
 Thumbs.db
 
 # Temp files
 tmp/
 temp/
 *.tmp
-
-# LithicDB data directories (created during tests and local runs)
-data/

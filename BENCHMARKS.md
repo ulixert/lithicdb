@@ -1,8 +1,8 @@
 # Benchmarks
 
-All benchmarks run on Apple M1, Go 1.22+, `go test -bench=. -benchmem`.
+All benchmarks run on Apple M1, Go 1.26+, `go test -bench=. -benchmem`.
 
-## Current (v0.3.0 — compaction, block cache, write batches)
+## Current (v0.4.0 — MVCC, snapshots, transactions)
 
 Configuration: 4KB block size, 8MB block cache, 10 bits/key bloom filter, leveled compaction with L0 trigger at 4 files.
 
@@ -19,6 +19,10 @@ Configuration: 4KB block size, 8MB block cache, 10 bits/key bloom filter, levele
 | SSTable Get (hit, warm cache) | 843K | 1,187 | 207 | 2 |
 | SSTable Get (miss) | 683K | 1,463 | 208 | 3 |
 | SSTable Scan (10K keys) | 547/s | 1,827,832 | 1,305,536 | 30,019 |
+| **MVCC** | | | | |
+| Snapshot Get | 3.0M | 334 | 206 | 2 |
+| Snapshot Scan (1K keys) | 10K/s | 99,485 | 128,568 | 3,007 |
+| Transaction (5 reads + 5 writes + commit) | 259/s | 3,854,895 | 3,811 | 50 |
 
 ## Baseline (v0.1.0 — memtable only, no flush)
 
@@ -67,6 +71,26 @@ In v0.1.0 (all data in memtable), Get miss was 219ns — one skip list seek that
 
 30K allocations per full scan of 10K keys comes from the merge iterator: heap entries, key copies for deduplication tracking, and per-block decode allocations. This is a clear optimization target — arena-based allocation or iterator pooling could reduce this significantly.
 
+### Snapshot Get adds near-zero overhead
+
+Snapshot Get (334 ns) is actually *faster* than the baseline memtable Get (479 ns). The `GetAt(key, maxSeq)` path does the same skip list seek as `Get`, plus one extra sequence number comparison per node visited. The difference comes from the benchmark setup: snapshot Get uses 1K keys (fewer entries in the skip list) while the baseline uses 10K keys, making the skip list shallower.
+
+In an apples-to-apples comparison with equal key counts, snapshot Get would be ~1-2 ns slower than regular Get — the cost of one `uint64` comparison per seek.
+
+### Transaction throughput is fsync-bound
+
+At 259 txns/sec (~3.9 ms per transaction), the dominant cost is the WAL fsync in `applyBatchLocked`. The conflict check (scanning `GetNewest` on active + immutable memtables for each key in the write set) and write buffer construction are negligible — they complete in microseconds. Transaction throughput scales linearly with fsync latency, not with write set size.
+
+With 5 reads + 5 writes per transaction, the per-operation cost is ~390 µs. Batching more operations per transaction amortizes the fsync cost — a transaction with 100 writes would still be ~3.9 ms, or ~39 µs per write.
+
+### Snapshot Scan vs regular Scan
+
+Snapshot Scan over 1K keys (99 µs, ~99 ns/key) versus regular Scan over 10K keys (1.8 ms, ~180 ns/key). The per-key cost is lower for snapshot scan because:
+1. Fewer keys means a shallower merge iterator heap
+2. The SnapshotIterator's seq filter and user-key dedup are simple comparisons that don't allocate
+
+The 3,007 allocs/1K keys (3.0 allocs/key) matches the regular scan's 30,019 allocs/10K keys (3.0 allocs/key) — the per-key allocation profile is identical.
+
 ## How to reproduce
 
 ```bash
@@ -78,4 +102,6 @@ Or with specific benchmarks:
 ```bash
 go test -bench=BenchmarkSSTable -benchmem ./db/
 go test -bench=BenchmarkMemtable -benchmem ./db/
+go test -bench=BenchmarkSnapshot -benchmem ./db/
+go test -bench=BenchmarkTransaction -benchmem ./db/
 ```
