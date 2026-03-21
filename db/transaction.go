@@ -1,8 +1,10 @@
 package db
 
 import (
+	"slices"
 	"sync/atomic"
 
+	"github.com/ulixert/lithicdb/iterator"
 	"github.com/ulixert/lithicdb/kv"
 )
 
@@ -133,4 +135,47 @@ func (tx *Transaction) Rollback() {
 	}
 	tx.snapshot.Close()
 	tx.writes = nil
+}
+
+// Scan returns an iterator over all key-value pairs visible to this
+// transaction, including buffered writes. Buffered writes take
+// priority over the snapshot for the same user key.
+func (tx *Transaction) Scan() iterator.Iterator {
+	return tx.mergedIterator(tx.db.rawScan())
+}
+
+// ScanRange returns an iterator over key-value pairs in [start, end)
+// visible to this transaction, including buffered writes.
+func (tx *Transaction) ScanRange(start, end []byte) iterator.Iterator {
+	return tx.mergedIterator(tx.db.rawScanRange(start, end))
+}
+
+// mergedIterator builds an iterator that merges the transaction's
+// write buffer with a raw database iterator, using the snapshot
+// iterator to deduplicate and filter by visibility.
+func (tx *Transaction) mergedIterator(rawIter iterator.Iterator) iterator.Iterator {
+	// Build write buffer entries with seq = snapshot.seq + 1 so they
+	// sort before (are "newer" than) any snapshot entry for the
+	// same user key.
+	bufSeq := tx.snapshot.seq + 1
+	entries := make([]iterator.WriteBufferEntry, 0, len(tx.writes))
+	for k, w := range tx.writes {
+		entries = append(entries, iterator.WriteBufferEntry{
+			Key:   kv.MakeInternalKey([]byte(k), bufSeq),
+			Value: w.value,
+		})
+	}
+
+	// Sort by internal key so the write buffer iterator is ordered.
+	slices.SortFunc(entries, func(a, b iterator.WriteBufferEntry) int {
+		return slices.Compare(a.Key, b.Key)
+	})
+
+	bufIter := iterator.NewWriteBufferIterator(entries)
+
+	// Merge write buffer with raw DB iterator. The merge iterator
+	// produces all versions in global sorted order. The snapshot
+	// iterator then picks the newest visible version per user key.
+	merged := iterator.NewMergeIterator([]iterator.Iterator{bufIter, rawIter})
+	return iterator.NewSnapshotIterator(merged, bufSeq)
 }
