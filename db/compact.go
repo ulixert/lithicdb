@@ -53,6 +53,18 @@ func (db *DB) runCompaction() {
 			return
 		}
 
+		// Determine if the output level is the bottommost (no data below).
+		task.IsBottommost = isBottommost(task.OutputLevel, state, db.opts.Compaction.MaxLevels)
+
+		// The watermark is the oldest active snapshot's sequence number.
+		// Versions with seq >= watermark must be retained. When no
+		// snapshots are active, the watermark is 0, so all old versions
+		// and bottommost tombstones can be dropped.
+		var watermark uint64
+		if oldest, ok := db.snapshots.OldestSeq(); ok {
+			watermark = oldest
+		}
+
 		// Ref all input handles so they aren't deleted during compaction
 		for _, h := range task.AllInputs() {
 			h.Ref()
@@ -65,6 +77,7 @@ func (db *DB) runCompaction() {
 			int64(db.opts.Compaction.LevelSizeBase)/10,
 			&idAllocator{db: db},
 			db.cache,
+			watermark,
 		)
 
 		// Unref inputs regardless of success/failure
@@ -194,6 +207,18 @@ func (db *DB) applyCompactionResult(result *compaction.CompactionResult) error {
 	}
 
 	return nil
+}
+
+// isBottommost returns true if no SSTables exist below the given level.
+// When true, tombstones can be safely dropped during compaction because
+// there are no older versions in lower levels to shadow.
+func isBottommost(outputLevel int, state *compaction.LevelState, maxLevels int) bool {
+	for level := outputLevel + 1; level < maxLevels; level++ {
+		if level < len(state.Levels) && len(state.Levels[level]) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func sortHandlesByFirstKey(handles []*sstable.TableHandle) {
