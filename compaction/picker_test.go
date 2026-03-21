@@ -252,7 +252,7 @@ func TestExecute_Basic(t *testing.T) {
 	seq := uint64(100)
 	alloc := &testAllocator{next: seq}
 
-	result, err := Execute(task, dir, 4096, 1024*1024, alloc, nil)
+	result, err := Execute(task, dir, 4096, 1024*1024, alloc, nil, 0)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestExecute_ManyKeys(t *testing.T) {
 		MaxKey:      maxKey,
 	}
 
-	result, err := Execute(task, dir, 4096, 1024*1024, &testAllocator{next: 1000}, nil)
+	result, err := Execute(task, dir, 4096, 1024*1024, &testAllocator{next: 1000}, nil, 0)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
