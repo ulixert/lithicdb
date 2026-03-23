@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package lithicpb;
+
+option go_package = "github.com/ulixert/lithicdb/proto/lithicpb";
+
+// ---- Client-facing service ----
+
+service LithicDB {
+  rpc Put(PutRequest) returns (PutResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Scan(ScanRequest) returns (stream ScanResponse);
+  rpc BatchWrite(BatchWriteRequest) returns (BatchWriteResponse);
+}
+
+message PutRequest {
+  bytes key   = 1;
+  bytes value = 2;
+}
+
+message PutResponse {}
+
+message GetRequest {
+  bytes key = 1;
+}
+
+message GetResponse {
+  bytes value = 1;
+  bool  found = 2;
+}
+
+message DeleteRequest {
+  bytes key = 1;
+}
+
+message DeleteResponse {}
+
+message ScanRequest {}
+
+message ScanResponse {
+  bytes key   = 1;
+  bytes value = 2;
+}
+
+message BatchWriteRequest {
+  repeated BatchEntry entries = 1;
+}
+
+message BatchEntry {
+  bytes key       = 1;
+  bytes value     = 2;
+  bool  is_delete = 3;
+}
+
+message BatchWriteResponse {}
+
+// ---- Node-to-node data plane ----
+
+service InternalService {}
+
+// ---- Operator topology management ----
+
+service AdminService {}
