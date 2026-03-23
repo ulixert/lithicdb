@@ -1,4 +1,4 @@
-.PHONY: all build test test-v test-race bench lint fmt vet clean
+.PHONY: all build test test-v test-race bench lint fmt vet clean proto
 
 # Default: run all checks
 all: fmt vet lint test-race
@@ -35,6 +35,12 @@ fmt:
 # Vet checks for suspicious constructs
 vet:
 	go vet ./...
+
+# Generate protobuf code (requires protoc, protoc-gen-go, protoc-gen-go-grpc)
+proto:
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	       proto/lithicpb/lithic.proto
 
 # Remove test artifacts and generated data
 clean:
