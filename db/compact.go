@@ -73,12 +73,20 @@ func (db *DB) runCompaction() {
 		}
 
 		if err != nil {
-			// TODO: log error
+			db.logger.Error("compaction execution failed",
+				"input_level", task.InputLevel,
+				"output_level", task.OutputLevel,
+				"error", err,
+			)
 			return
 		}
 
 		if err := db.applyCompactionResult(result); err != nil {
-			// TODO: log error
+			db.logger.Error("compaction apply failed",
+				"input_level", task.InputLevel,
+				"output_level", task.OutputLevel,
+				"error", err,
+			)
 			return
 		}
 	}
