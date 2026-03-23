@@ -17,9 +17,14 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 
 // Scan returns an iterator over all entries in sorted key order.
 //
-// The iterator reads from in-memory data (Readers load the full file
-// into memory), so it does not need to hold TableHandle references.
-// If the Reader switches to mmap, iterators would need to Ref/Unref.
+// The iterator reads from mmap'd SSTable data. It does not currently
+// Ref/Unref TableHandles - this is safe because tryDelete only calls
+// os.Remove (not munmap), and on Unix a removed file's mmap stays
+// valid. Reader.Close() (munmap) is only called from DB.Close(),
+// which waits for all background work to finish first.
+//
+// TODO: add Ref/Unref to scan paths to allow eager munmap of
+// compacted SSTables, reclaiming their disk space sooner.
 //
 // Returns internal keys. The caller must call Close().
 func (db *DB) Scan() iterator.Iterator {

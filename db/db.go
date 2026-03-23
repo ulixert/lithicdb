@@ -270,5 +270,16 @@ func (db *DB) Close() error {
 		_ = db.manifest.Close()
 	}
 
+	// Release mmap'd SSTable readers. Without this, mmap regions
+	// leak until the process exits.
+	for _, h := range db.l0 {
+		_ = h.Reader.Close()
+	}
+	for _, level := range db.levels {
+		for _, h := range level {
+			_ = h.Reader.Close()
+		}
+	}
+
 	return nil
 }
