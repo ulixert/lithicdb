@@ -8,6 +8,9 @@
 package hashring
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
 	"sort"
 	"sync"
 )
@@ -91,4 +94,106 @@ func (r *Ring) RemoveNode(nodeID string) {
 		}
 	}
 	r.vnodes = filtered
+}
+
+// GetNode returns the primary owner of the given key - the first node
+// found clockwise from the key's hash position on the ring.
+// Returns a zero Node if the ring is empty.
+func (r *Ring) GetNode(key []byte) Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.vnodes) == 0 {
+		return Node{}
+	}
+
+	h := hashKey(key)
+	idx := r.search(h)
+	return r.nodes[r.vnodes[idx].nodeID]
+}
+
+// GetNodes returns up to n distinct physical nodes responsible for the
+// given key, walking clockwise from the key's hash position. If fewer
+// than n physical nodes exist, all nodes are returned.
+// Returns nil if the ring is empty.
+func (r *Ring) GetNodes(key []byte, n int) []Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.vnodes) == 0 || n <= 0 {
+		return nil
+	}
+
+	// Cap n to the number of physical nodes.
+	if n > len(r.nodes) {
+		n = len(r.nodes)
+	}
+
+	h := hashKey(key)
+	idx := r.search(h)
+
+	result := make([]Node, 0, n)
+	seen := make(map[string]struct{}, n)
+
+	for range r.vnodes {
+		vn := r.vnodes[idx]
+		if _, ok := seen[vn.nodeID]; !ok {
+			seen[vn.nodeID] = struct{}{}
+			result = append(result, r.nodes[vn.nodeID])
+			if len(result) == n {
+				break
+			}
+		}
+		idx = (idx + 1) % len(r.vnodes)
+	}
+
+	return result
+}
+
+// Members returns all physical nodes currently in the ring.
+// The order is not guaranteed.
+func (r *Ring) Members() []Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	members := make([]Node, 0, len(r.nodes))
+	for _, node := range r.nodes {
+		members = append(members, node)
+	}
+	return members
+}
+
+// Size returns the number of physical nodes in the ring.
+func (r *Ring) Size() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.nodes)
+}
+
+// search returns the index of the first vnode with hash >= h.
+// If no such vnode exists (h is past the last vnode), wraps to 0.
+// Caller must hold at least r.mu.RLock.
+func (r *Ring) search(h uint64) int {
+	idx := sort.Search(len(r.vnodes), func(i int) bool {
+		return r.vnodes[i].hash >= h
+	})
+	if idx == len(r.vnodes) {
+		return 0
+	}
+	return idx
+}
+
+// hashVnode computes the ring position for a virtual node.
+// Format: SHA-256("{nodeID}-{index}"), truncated to uint64.
+func hashVnode(nodeID string, index int) uint64 {
+	data := []byte(fmt.Sprintf("%s-%d", nodeID, index))
+	sum := sha256.Sum256(data)
+	return binary.BigEndian.Uint64(sum[:8])
+}
+
+// hashKey computes the ring position for an arbitrary key.
+// SHA-256 of raw key bytes, truncated to uint64.
+func hashKey(key []byte) uint64 {
+	sum := sha256.Sum256(key)
+	return binary.BigEndian.Uint64(sum[:8])
 }
