@@ -39,7 +39,10 @@ func (db *DB) flushImmutables() {
 		db.mu.RUnlock()
 
 		if err := db.flushMemtable(mt); err != nil {
-			// TODO: log error, retry with backoff, or shut down
+			db.logger.Error("memtable flush failed",
+				"memtable_id", mt.ID(),
+				"error", err,
+			)
 			return
 		}
 	}

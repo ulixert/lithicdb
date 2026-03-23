@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 
@@ -20,6 +21,7 @@ type Options struct {
 	BlockSize         int
 	BlockCacheSize    int64 // total block cache capacity in bytes (0 = 8MB default)
 	MaxImmutableCount int   // max unflushed memtables before writes block (0 = 5)
+	Logger            *slog.Logger
 	Compaction        compaction.Config
 }
 
@@ -42,7 +44,8 @@ func DefaultOptions(dir string) Options {
 //   - Flush runs in the background, acquires mu briefly to swap state
 //   - Compaction runs in the background, acquires mu briefly to swap old tables for new ones
 type DB struct {
-	opts Options
+	opts   Options
+	logger *slog.Logger
 
 	mu         sync.RWMutex
 	active     *memtable.Memtable
@@ -78,8 +81,14 @@ func Open(opts Options) (*DB, error) {
 		opts.MaxImmutableCount = 5
 	}
 
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	db := &DB{
 		opts:      opts,
+		logger:    logger,
 		cache:     sstable.NewBlockCache(opts.BlockCacheSize),
 		flushCh:   make(chan struct{}, 1),
 		compactCh: make(chan struct{}, 1),

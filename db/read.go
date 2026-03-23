@@ -1,6 +1,8 @@
 package db
 
 import (
+	"fmt"
+
 	"github.com/ulixert/lithicdb/iterator"
 	"github.com/ulixert/lithicdb/kv"
 	"github.com/ulixert/lithicdb/sstable"
@@ -60,7 +62,11 @@ func (db *DB) getAt(key []byte, maxSeq uint64) (kv.Value, bool) {
 		val, found, err := h.Reader.GetAt(key, maxSeq)
 		if err != nil {
 			// Skip this SSTable rather than failing the entire read.
-			// TODO: add error logging and metrics
+			db.logger.Error("sstable read error",
+				"level", "L0",
+				"sstable_id", h.Reader.ID(),
+				"error", err,
+			)
 			continue
 		}
 		if found {
@@ -70,13 +76,18 @@ func (db *DB) getAt(key []byte, maxSeq uint64) (kv.Value, bool) {
 
 	// L1+ (non-overlapping within each level)
 	if len(levels) > 1 {
-		for _, level := range levels[1:] {
+		for i, level := range levels[1:] {
 			for _, h := range level {
 				if !h.Reader.MayContain(key) {
 					continue
 				}
 				val, found, err := h.Reader.GetAt(key, maxSeq)
 				if err != nil {
+					db.logger.Error("sstable read error",
+						"level", fmt.Sprintf("L%d", i+1),
+						"sstable_id", h.Reader.ID(),
+						"error", err,
+					)
 					continue
 				}
 				if found {
