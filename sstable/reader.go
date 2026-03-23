@@ -6,71 +6,65 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
+	"sync"
+	"syscall"
 
 	"github.com/ulixert/lithicdb/kv"
 )
 
-// Reader provides read access to an SSTable file. On open, it reads
-// the footer, bloom filter, and index block into memory. Data blocks
-// are read on demand during Get or Scan operations, optionally via
-// a shared BlockCache.
+// Reader provides read access to an SSTable file. On open, it mmap's
+// the file and parses the footer, bloom filter, and index block.
+// Data blocks are read on demand during Get or Scan operations,
+// optionally via a shared BlockCache.
+//
+// The mmap'd region stays valid even after the file is deleted (Unix
+// keeps the inode alive). Call Close() to munmap when the Reader is
+// no longer needed.
 //
 // Reader is safe for concurrent use by multiple goroutines.
 type Reader struct {
 	id       uint64
-	data     []byte // mmap candidate - currently read into memory
-	bloom    []byte
+	data     []byte // mmap'd file contents
+	bloom    []byte // copied from mmap'd data on open
 	firstKey []byte
 	metas    []blockMeta
 	cache    *BlockCache
+
+	closeOnce sync.Once
 }
 
-// OpenReader opens an SSTable file and reads its metadata.
+// OpenReader opens an SSTable file via mmap and reads its metadata.
 // If the cache is non-nil, block reads will go through the cache.
+// The caller must call Close() when done to release the mmap.
 func OpenReader(dir string, id uint64, cache ...*BlockCache) (*Reader, error) {
 	path := SSTPath(dir, id)
-	data, err := os.ReadFile(path)
+
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("sstable: open %s: %w", path, err)
 	}
+	defer f.Close()
 
-	if len(data) < footerSize {
-		return nil, fmt.Errorf("sstable: file too small (%d bytes)", len(data))
-	}
-
-	// Decode footer
-	f, err := decodeFooter(data)
+	info, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("sstable: %s: %w", path, err)
+		return nil, fmt.Errorf("sstable: stat %s: %w", path, err)
 	}
 
-	// Read bloom filter
-	bloomEnd := f.bloomOffset + uint64(f.bloomLen)
-	if bloomEnd > uint64(len(data)) {
-		return nil, fmt.Errorf("sstable: bloom filter extends past file end")
-	}
-	var bloom []byte
-	if f.bloomLen > 0 {
-		bloom = data[f.bloomOffset:bloomEnd]
+	size := int(info.Size())
+	if size < footerSize {
+		return nil, fmt.Errorf("sstable: file too small (%d bytes)", size)
 	}
 
-	// Read and decode the index block
-	indexEnd := f.indexOffset + uint64(f.indexLen)
-	if indexEnd > uint64(len(data)) {
-		return nil, fmt.Errorf("sstable: index block extends past file end")
-	}
-
-	firstKey, metas, err := decodeIndex(data[f.indexOffset:indexEnd])
+	data, err := syscall.Mmap(int(f.Fd()), 0, size, syscall.PROT_READ, syscall.MAP_PRIVATE)
 	if err != nil {
-		return nil, fmt.Errorf("sstable: %s: %w", path, err)
+		return nil, fmt.Errorf("sstable: mmap %s: %w", path, err)
 	}
 
-	r := &Reader{
-		id:       id,
-		data:     data,
-		bloom:    bloom,
-		firstKey: firstKey,
-		metas:    metas,
+	// From here on, if we fail, we must munmap.
+	r, err := openFromData(id, data)
+	if err != nil {
+		_ = syscall.Munmap(data)
+		return nil, fmt.Errorf("sstable: %s: %w", path, err)
 	}
 
 	if len(cache) > 0 && cache[0] != nil {
@@ -78,6 +72,62 @@ func OpenReader(dir string, id uint64, cache ...*BlockCache) (*Reader, error) {
 	}
 
 	return r, nil
+}
+
+// openFromData parses an SSTable from a byte slice (mmap'd or heap).
+// The bloom filter is copied out of data so it survives munmap of
+// the main data region (bloom is accessed on every lookup via
+// MayContain, so it must remain valid).
+func openFromData(id uint64, data []byte) (*Reader, error) {
+	f, err := decodeFooter(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Copy bloom filter out of the mmap'd region - it's accessed on every
+	// lookup and must survive even if the mmap is released.
+	bloomEnd := f.bloomOffset + uint64(f.bloomLen)
+	if bloomEnd > uint64(len(data)) {
+		return nil, fmt.Errorf("bloom filter extends past file end")
+	}
+	var bloom []byte
+	if f.bloomLen > 0 {
+		bloom = make([]byte, f.bloomLen)
+		copy(bloom, data[f.bloomOffset:bloomEnd])
+	}
+
+	// Read and decode the index block. decodeIndex already copies
+	// firstKey and lastKey bytes, so they don't alias the mmap.
+	indexEnd := f.indexOffset + uint64(f.indexLen)
+	if indexEnd > uint64(len(data)) {
+		return nil, fmt.Errorf("index block extends past file end")
+	}
+
+	firstKey, metas, err := decodeIndex(data[f.indexOffset:indexEnd])
+	if err != nil {
+		return nil, err
+	}
+
+	return &Reader{
+		id:       id,
+		data:     data,
+		bloom:    bloom,
+		firstKey: firstKey,
+		metas:    metas,
+	}, nil
+}
+
+// Close releases the mmap'd region. After Close, the Reader must not
+// be used. Close is idempotent.
+func (r *Reader) Close() error {
+	var err error
+	r.closeOnce.Do(func() {
+		if r.data != nil {
+			err = syscall.Munmap(r.data)
+			r.data = nil
+		}
+	})
+	return err
 }
 
 // ID returns the SSTable's unique identifier.
@@ -154,7 +204,7 @@ func (r *Reader) readBlock(blockIdx int) (*Block, error) {
 	return r.readBlockFromData(blockIdx, meta)
 }
 
-// readBlockFromData reads a block directly from the in-memory file data,
+// readBlockFromData reads a block directly from the mmap'd file data,
 // verifies its checksum, and decodes it.
 func (r *Reader) readBlockFromData(blockIdx int, meta blockMeta) (*Block, error) {
 	blockEnd := meta.offset + uint64(meta.size)
