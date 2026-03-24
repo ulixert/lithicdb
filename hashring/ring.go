@@ -10,8 +10,8 @@ package hashring
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -32,23 +32,23 @@ type vnode struct {
 // key distribution. Lookups find the first vnode clockwise from the
 // key's hash position.
 type Ring struct {
-	mu           sync.RWMutex
-	vnodes       []vnode         // sorted by hash
-	nodes        map[string]Node // nodeID → Node
-	virtualNodes int             // vnodes per physical node
+	mu            sync.RWMutex
+	vnodes        []vnode         // sorted by hash
+	nodes         map[string]Node // nodeID → Node
+	vnodesPerNode int             // virtual nodes per physical node
 }
 
 // New creates an empty consistent hash ring. Each physical node added
-// will be represented by virtualNodes points on the ring. A typical
+// will be represented by vnodesPerNode points on the ring. A typical
 // value is 150 - with 3 physical nodes that give 450 vnodes, enough
 // for good distribution without excessive memory.
-func New(virtualNodes int) *Ring {
-	if virtualNodes <= 0 {
-		virtualNodes = 150
+func New(vnodesPerNode int) *Ring {
+	if vnodesPerNode <= 0 {
+		vnodesPerNode = 150
 	}
 	return &Ring{
-		nodes:        make(map[string]Node),
-		virtualNodes: virtualNodes,
+		nodes:         make(map[string]Node),
+		vnodesPerNode: vnodesPerNode,
 	}
 }
 
@@ -64,7 +64,7 @@ func (r *Ring) AddNode(node Node) {
 
 	r.nodes[node.ID] = node
 
-	for i := range r.virtualNodes {
+	for i := range r.vnodesPerNode {
 		h := hashVnode(node.ID, i)
 		r.vnodes = append(r.vnodes, vnode{hash: h, nodeID: node.ID})
 	}
@@ -186,8 +186,12 @@ func (r *Ring) search(h uint64) int {
 // hashVnode computes the ring position for a virtual node.
 // Format: SHA-256("{nodeID}-{index}"), truncated to uint64.
 func hashVnode(nodeID string, index int) uint64 {
-	data := []byte(fmt.Sprintf("%s-%d", nodeID, index))
-	sum := sha256.Sum256(data)
+	// Build "{nodeID}-{index}" without fmt.Sprintf allocation.
+	buf := make([]byte, 0, len(nodeID)+1+10) // nodeID + '-' + up to 10 digits
+	buf = append(buf, nodeID...)
+	buf = append(buf, '-')
+	buf = strconv.AppendInt(buf, int64(index), 10)
+	sum := sha256.Sum256(buf)
 	return binary.BigEndian.Uint64(sum[:8])
 }
 
