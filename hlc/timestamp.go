@@ -18,11 +18,22 @@ import (
 	"fmt"
 )
 
-// timestampHeaderSize is the fixed portion of an encoded timestamp:
-// 8 bytes WallTime + 4 bytes Logical + 2 bytes NodeID length.
-const timestampHeaderSize = 8 + 4 + 2
+const (
+	wallTimeSize  = 8 // int64 big-endian
+	logicalSize   = 4 // uint32 big-endian
+	nodeIDLenSize = 2 // uint16 big-endian
 
-var ErrCorruptTimestamp = errors.New("hlc: corrupt timestamp encoding")
+	// timestampHeaderSize is the fixed portion of an encoded timestamp.
+	timestampHeaderSize = wallTimeSize + logicalSize + nodeIDLenSize
+
+	// maxNodeIDLen is the maximum NodeID length encodable in uint16.
+	maxNodeIDLen = 1<<16 - 1
+)
+
+var (
+	ErrCorruptTimestamp = errors.New("hlc: corrupt timestamp encoding")
+	ErrNodeIDTooLong    = errors.New("hlc: NodeID exceeds maximum length (65535 bytes)")
+)
 
 // Timestamp is a hybrid logical clock value. It combines a physical
 // wall clock (nanoseconds since epoch), a logical counter for sub-tick
@@ -56,20 +67,25 @@ func (t Timestamp) Equal(other Timestamp) bool {
 
 // IsZero reports whether the timestamp is the zero value.
 func (t Timestamp) IsZero() bool {
-	return t.WallTime == 0 && t.Logical == 0
+	return t.WallTime == 0 && t.Logical == 0 && t.NodeID == ""
 }
 
 // Encode serializes the timestamp to a big-endian byte slice.
 // Format: [WallTime:8][Logical:4][NodeIDLen:2][NodeID:*]
 // Big-endian so that byte-wise comparison preserves temporal ordering
 // for the fixed-width fields.
-func (t Timestamp) Encode() []byte {
+//
+// Returns an error if NodeID exceeds 65535 bytes.
+func (t Timestamp) Encode() ([]byte, error) {
+	if len(t.NodeID) > maxNodeIDLen {
+		return nil, ErrNodeIDTooLong
+	}
 	buf := make([]byte, timestampHeaderSize+len(t.NodeID))
 	binary.BigEndian.PutUint64(buf[0:], uint64(t.WallTime))
-	binary.BigEndian.PutUint32(buf[8:], t.Logical)
-	binary.BigEndian.PutUint16(buf[12:], uint16(len(t.NodeID)))
+	binary.BigEndian.PutUint32(buf[wallTimeSize:], t.Logical)
+	binary.BigEndian.PutUint16(buf[wallTimeSize+logicalSize:], uint16(len(t.NodeID)))
 	copy(buf[timestampHeaderSize:], t.NodeID)
-	return buf
+	return buf, nil
 }
 
 // DecodeTimestamp deserializes a timestamp from the format produced by
@@ -81,15 +97,20 @@ func DecodeTimestamp(b []byte) (Timestamp, error) {
 	}
 
 	wallTime := int64(binary.BigEndian.Uint64(b[0:]))
-	logical := binary.BigEndian.Uint32(b[8:])
-	nodeIDLen := int(binary.BigEndian.Uint16(b[12:]))
+	logical := binary.BigEndian.Uint32(b[wallTimeSize:])
+	nodeIDLen := int(binary.BigEndian.Uint16(b[wallTimeSize+logicalSize:]))
 
-	if timestampHeaderSize+nodeIDLen > len(b) {
+	expectedLen := timestampHeaderSize + nodeIDLen
+	if len(b) < expectedLen {
 		return Timestamp{}, fmt.Errorf("%w: nodeID length %d exceeds data",
 			ErrCorruptTimestamp, nodeIDLen)
 	}
+	if len(b) != expectedLen {
+		return Timestamp{}, fmt.Errorf("%w: %d trailing bytes",
+			ErrCorruptTimestamp, len(b)-expectedLen)
+	}
 
-	nodeID := string(b[timestampHeaderSize : timestampHeaderSize+nodeIDLen])
+	nodeID := string(b[timestampHeaderSize:expectedLen])
 
 	return Timestamp{
 		WallTime: wallTime,
