@@ -207,6 +207,11 @@ func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
 	}
 
 	// Update member ring states.
+	// Ring state is NOT propagated via incarnation - incarnation is purely
+	// a SWIM liveness concept (only a node increments its own incarnation
+	// to refute suspicion). Ring state is conveyed via the RingDescriptor's
+	// Version field. We still broadcast the updated member so peers learn
+	// the ring state change, but without bumping incarnation.
 	for nodeID, ms := range m.members {
 		newState, inRing := ringMembers[nodeID]
 		if !inRing {
@@ -214,7 +219,6 @@ func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
 		}
 		if ms.Ring != newState {
 			ms.Ring = newState
-			ms.Incarnation++
 			m.queueBroadcastLocked(*ms)
 		}
 	}
