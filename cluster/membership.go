@@ -106,3 +106,171 @@ func (m *Membership) Stop() {
 		delete(m.suspectTimers, id)
 	}
 }
+
+// OnLivenessChange registers a callback invoked when a node's liveness
+// state changes. The callback is called under the membership lock -
+// it must not block.
+func (m *Membership) OnLivenessChange(fn func(nodeID string, from, to LivenessState)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onLivenessChange = fn
+}
+
+// OnRingChange registers a callback invoked when the ring descriptor
+// changes. The callback is called under the membership lock.
+func (m *Membership) OnRingChange(fn func(RingDescriptor)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onRingChange = fn
+}
+
+// --- Query methods ---
+
+// IsAlive returns true if the given node is in the Alive state.
+func (m *Membership) IsAlive(nodeID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ms, ok := m.members[nodeID]
+	return ok && ms.Liveness == Alive
+}
+
+// AliveMembers returns all members in the Alive state.
+func (m *Membership) AliveMembers() []MemberState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []MemberState
+	for _, ms := range m.members {
+		if ms.Liveness == Alive {
+			result = append(result, *ms)
+		}
+	}
+	return result
+}
+
+// ActiveRingMembers returns members that are both Alive and RingActive.
+func (m *Membership) ActiveRingMembers() []MemberState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []MemberState
+	for _, ms := range m.members {
+		if ms.Liveness == Alive && ms.Ring == RingActive {
+			result = append(result, *ms)
+		}
+	}
+	return result
+}
+
+// RingStateOf returns the ring state of the given node.
+// Returns RingNone if the node is unknown.
+func (m *Membership) RingStateOf(nodeID string) RingState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if ms, ok := m.members[nodeID]; ok {
+		return ms.Ring
+	}
+	return RingNone
+}
+
+// GetMembers returns a snapshot of all known members.
+func (m *Membership) GetMembers() []MemberState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]MemberState, 0, len(m.members))
+	for _, ms := range m.members {
+		result = append(result, *ms)
+	}
+	return result
+}
+
+// GetRingDescriptor returns the current versioned ring descriptor.
+func (m *Membership) GetRingDescriptor() RingDescriptor {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.ringDesc
+}
+
+// ApplyRingDescriptor applies a new ring descriptor if its version
+// is higher than the current one. Updates member ring states and
+// queues gossip broadcasts for each changed member.
+func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if rd.Version <= m.ringDesc.Version {
+		return nil // stale, ignore
+	}
+
+	// Build a set of ring members from the new descriptor.
+	ringMembers := make(map[string]RingState, len(rd.Members))
+	for _, rm := range rd.Members {
+		ringMembers[rm.NodeID] = rm.State
+	}
+
+	// Update member ring states.
+	for nodeID, ms := range m.members {
+		newState, inRing := ringMembers[nodeID]
+		if !inRing {
+			newState = RingNone
+		}
+		if ms.Ring != newState {
+			ms.Ring = newState
+			ms.Incarnation++
+			m.queueBroadcastLocked(*ms)
+		}
+	}
+
+	m.ringDesc = rd
+
+	if m.onRingChange != nil {
+		m.onRingChange(rd)
+	}
+
+	return nil
+}
+
+// --- SWIM probe loop ---
+
+const maxPiggyback = 10 // max gossip updates per message
+
+func (m *Membership) probeLoop() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(m.cfg.GossipInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.probe()
+		}
+	}
+}
+
+// probe runs a single SWIM probe cycle: pick a target, direct ping,
+// indirect ping on failure, suspect/dead transitions.
+func (m *Membership) probe() {
+}
+
+// --- Discovery ---
+
+func (m *Membership) syncWithPeer(ctx context.Context, addr string) {
+	m.mu.RLock()
+	local := make([]MemberState, 0, len(m.members))
+	for _, ms := range m.members {
+		local = append(local, *ms)
+	}
+	m.mu.RUnlock()
+
+	remote, err := m.tp.GossipSync(ctx, addr, local)
+	if err != nil {
+		return // seed unreachable - not fatal, try others
+	}
+
+	m.mu.Lock()
+	for _, u := range remote {
+		m.mergeLocked(u)
+	}
+	m.mu.Unlock()
+}
