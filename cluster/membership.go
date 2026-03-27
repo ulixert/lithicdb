@@ -257,6 +257,47 @@ func (m *Membership) probeLoop() {
 func (m *Membership) probe() {
 }
 
+// --- Gossip merge ---
+
+// mergeLocked merges a remote member state update into the local table.
+// Returns true if the update was applied (newer than local state).
+// Caller must hold m.mu.
+func (m *Membership) mergeLocked(remote MemberState) bool {
+	local, exists := m.members[remote.NodeID]
+
+	if !exists {
+		// New node - accept unconditionally.
+		m.members[remote.NodeID] = new(remote)
+		return true
+	}
+
+	// Self-refutation: if someone thinks we're Suspect or Dead,
+	// increment our incarnation and broadcast that we're Alive.
+	if remote.NodeID == m.selfID && remote.Liveness > Alive {
+		if remote.Incarnation >= local.Incarnation {
+			local.Incarnation = remote.Incarnation + 1
+			local.Liveness = Alive
+			m.queueBroadcastLocked(*local)
+		}
+		return false // we refuted - the remote state was not applied
+	}
+
+	// Higher incarnation always wins.
+	if remote.Incarnation > local.Incarnation {
+		*local = remote
+		return true
+	}
+
+	// Same incarnation: higher liveness state wins (Dead > Suspect > Alive).
+	// This ensures convergence toward detecting failures.
+	if remote.Incarnation == local.Incarnation && remote.Liveness > local.Liveness {
+		local.Liveness = remote.Liveness
+		return true
+	}
+
+	return false // stale
+}
+
 // --- Discovery ---
 
 func (m *Membership) syncWithPeer(ctx context.Context, addr string) {
