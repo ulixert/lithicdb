@@ -271,7 +271,7 @@ func (m *Membership) HandlePing(msg *PingMessage) *PingMessage {
 		ringDesc = m.ringDesc
 	}
 
-	updates := m.getBroadcastsLocked(maxPiggyback)
+	updates := m.getBroadcastsLocked(m.maxPiggyback())
 	localRingDesc := m.ringDesc
 	m.mu.Unlock()
 
@@ -350,7 +350,8 @@ func (m *Membership) HandleGossipSync(remote []MemberState, remoteRingDesc *Ring
 
 // --- SWIM probe loop ---
 
-const maxPiggyback = 10 // max gossip updates per message
+// defaultMaxPiggyback is the default max gossip updates per message.
+const defaultMaxPiggyback = 10
 
 func (m *Membership) probeLoop() {
 	defer m.wg.Done()
@@ -385,7 +386,7 @@ func (m *Membership) probe() {
 
 	// Collect broadcasts under write lock (getBroadcastsLocked mutates).
 	m.mu.Lock()
-	updates := m.getBroadcastsLocked(maxPiggyback)
+	updates := m.getBroadcastsLocked(m.maxPiggyback())
 	localRingDesc := m.ringDesc
 	m.mu.Unlock()
 
@@ -770,6 +771,13 @@ func (m *Membership) ringStateFromDescriptor(nodeID string) RingState {
 
 // --- Gossip retransmit buffer ---
 
+func (m *Membership) maxPiggyback() int {
+	if m.cfg.MaxPiggyback > 0 {
+		return m.cfg.MaxPiggyback
+	}
+	return defaultMaxPiggyback
+}
+
 // retransmitLimit returns how many times a broadcast should be
 // piggybacked: RetransmitMult * ceil(log2(N)).
 func (m *Membership) retransmitLimit() int {
@@ -786,13 +794,17 @@ func (m *Membership) queueBroadcastLocked(state MemberState) {
 		retransmits: m.retransmitLimit(),
 	})
 
-	// Cap buffer size to prevent unbounded growth.
+	// Cap buffer size to prevent unbounded growth. Keep the items
+	// with the highest retransmit counts (freshest, least disseminated).
 	maxBroadcasts := m.cfg.MaxBroadcasts
 	if maxBroadcasts <= 0 {
 		maxBroadcasts = 128
 	}
 	if len(m.broadcasts) > maxBroadcasts {
-		m.broadcasts = m.broadcasts[len(m.broadcasts)-maxBroadcasts:]
+		sort.Slice(m.broadcasts, func(i, j int) bool {
+			return m.broadcasts[i].retransmits > m.broadcasts[j].retransmits
+		})
+		m.broadcasts = m.broadcasts[:maxBroadcasts]
 	}
 }
 

@@ -45,6 +45,11 @@ type ClusterConfig struct {
 	// bandwidth. Default: 4.
 	RetransmitMult int
 
+	// MaxPiggyback is the max gossip updates piggybacked on each
+	// outgoing ping/ack message. Higher values speed up convergence
+	// but increase per-message size. Default: 10.
+	MaxPiggyback int
+
 	// MaxBroadcasts caps the gossip retransmit buffer size. When the
 	// buffer exceeds this limit, oldest entries are dropped. Default: 128.
 	MaxBroadcasts int
@@ -66,6 +71,7 @@ func DefaultClusterConfig(nodeID, addr string) ClusterConfig {
 		SuspectTimeout:      5 * time.Second,
 		IndirectPeers:       3,
 		RetransmitMult:      4,
+		MaxPiggyback:        10,
 		MaxBroadcasts:       128,
 		DeadNodeReapTimeout: 24 * time.Hour,
 	}
