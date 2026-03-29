@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 )
@@ -296,6 +297,63 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 	}
 
 	return false // stale
+}
+
+// --- Gossip broadcast queue ---
+
+// retransmitLimit returns how many times a broadcast should be
+// piggybacked: RetransmitMult * ceil(log2(N)).
+func (m *Membership) retransmitLimit() int {
+	n := len(m.members)
+	if n < 2 {
+		return m.cfg.RetransmitMult
+	}
+	return m.cfg.RetransmitMult * int(math.Ceil(math.Log2(float64(n))))
+}
+
+func (m *Membership) queueBroadcastLocked(state MemberState) {
+	m.broadcasts = append(m.broadcasts, broadcast{
+		state:       state,
+		retransmits: m.retransmitLimit(),
+	})
+
+	// Cap queue size to prevent unbounded growth. Keep the most recent
+	// entries (highest retransmit counts).
+	const maxBroadcasts = 128
+	if len(m.broadcasts) > maxBroadcasts {
+		m.broadcasts = m.broadcasts[len(m.broadcasts)-maxBroadcasts:]
+	}
+}
+
+// getBroadcastsLocked returns up to limit updates for piggybacking.
+// Decrements retransmit counters and remove exhausted entries.
+// Caller must hold at least m.mu.RLock (but we mutate broadcasts,
+// so this should be called under write lock in practice).
+func (m *Membership) getBroadcastsLocked(limit int) []MemberState {
+	if len(m.broadcasts) == 0 {
+		return nil
+	}
+
+	n := limit
+	if n > len(m.broadcasts) {
+		n = len(m.broadcasts)
+	}
+
+	result := make([]MemberState, 0, n)
+	alive := m.broadcasts[:0]
+
+	for i := range m.broadcasts {
+		if len(result) < limit {
+			result = append(result, m.broadcasts[i].state)
+		}
+		m.broadcasts[i].retransmits--
+		if m.broadcasts[i].retransmits > 0 {
+			alive = append(alive, m.broadcasts[i])
+		}
+	}
+
+	m.broadcasts = alive
+	return result
 }
 
 // --- Discovery ---
