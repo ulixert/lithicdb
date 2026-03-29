@@ -351,40 +351,77 @@ func (m *Membership) probe() {
 		SenderID:   m.selfID,
 		SenderAddr: m.cfg.Addr,
 		Updates:    updates,
+		RingDesc:   new(m.ringDesc),
 	})
 
 	if err == nil {
 		// Direct ping succeeded - merge response and ensure alive.
+		var event *livenessEvent
+		var cb func(string, LivenessState, LivenessState)
+
 		m.mu.Lock()
 		for _, u := range resp.Updates {
 			m.mergeLocked(u)
 		}
-		// If target was Suspect, refute it back to Alive.
+
+		// Apply piggybacked ring descriptor if newer.
+		var ringCb func(RingDescriptor)
+		var ringDesc RingDescriptor
+		if resp.RingDesc != nil && resp.RingDesc.Version > m.ringDesc.Version {
+			m.applyRingDescriptor(*resp.RingDesc)
+			ringCb = m.onRingChange
+			ringDesc = m.ringDesc
+		}
+		// If target was Suspect, transition back to Alive.
 		if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Suspect {
-			m.setLivenessLocked(target.NodeID, Alive)
+			event = m.setLivenessLocked(target.NodeID, Alive)
+			cb = m.onLivenessChange
 		}
 		m.mu.Unlock()
+
+		if ringCb != nil {
+			ringCb(ringDesc)
+		}
+		if event != nil && cb != nil {
+			cb(event.nodeID, event.from, event.to)
+		}
 		return
 	}
 
 	// Direct ping failed - try indirect pings.
 	if m.indirectPing(target) {
 		// Indirect ping succeeded.
+		var event *livenessEvent
+		var cb func(string, LivenessState, LivenessState)
+
 		m.mu.Lock()
 		if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Suspect {
-			m.setLivenessLocked(target.NodeID, Alive)
+			event = m.setLivenessLocked(target.NodeID, Alive)
+			cb = m.onLivenessChange
 		}
 		m.mu.Unlock()
+
+		if event != nil && cb != nil {
+			cb(event.nodeID, event.from, event.to)
+		}
 		return
 	}
 
 	// All pings failed - suspect the target.
+	var event *livenessEvent
+	var cb func(string, LivenessState, LivenessState)
+
 	m.mu.Lock()
 	if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Alive {
-		m.setLivenessLocked(target.NodeID, Suspect)
+		event = m.setLivenessLocked(target.NodeID, Suspect)
+		cb = m.onLivenessChange
 		m.startSuspectTimerLocked(target.NodeID)
 	}
 	m.mu.Unlock()
+
+	if event != nil && cb != nil {
+		cb(event.nodeID, event.from, event.to)
+	}
 }
 
 // indirectPing asks up to K random alive peers to ping the target
@@ -441,7 +478,6 @@ func (m *Membership) nextProbeTarget() *MemberState {
 	ms, ok := m.members[nodeID]
 	if !ok || ms.Liveness == Dead {
 		// Skip dead or removed nodes - try the next one.
-		// Recursive but bounded by probe order length.
 		return m.nextProbeTargetLocked()
 	}
 
@@ -542,15 +578,23 @@ func (m *Membership) startSuspectTimerLocked(nodeID string) {
 	}
 
 	m.suspectTimers[nodeID] = time.AfterFunc(m.cfg.SuspectTimeout, func() {
-		m.mu.Lock()
-		defer m.mu.Unlock()
+		var event *livenessEvent
+		var cb func(string, LivenessState, LivenessState)
 
+		m.mu.Lock()
 		ms, ok := m.members[nodeID]
 		if !ok || ms.Liveness != Suspect {
+			m.mu.Unlock()
 			return // already refuted or removed
 		}
+		event = m.setLivenessLocked(nodeID, Dead)
+		cb = m.onLivenessChange
+		m.mu.Unlock()
 
-		m.setLivenessLocked(nodeID, Dead)
+		// Fire callback outside the lock.
+		if event != nil && cb != nil {
+			cb(event.nodeID, event.from, event.to)
+		}
 	})
 }
 
@@ -660,16 +704,29 @@ func (m *Membership) syncWithPeer(ctx context.Context, addr string) {
 	for _, ms := range m.members {
 		local = append(local, *ms)
 	}
+	localRingDesc := m.ringDesc
 	m.mu.RUnlock()
 
-	remote, err := m.tp.GossipSync(ctx, addr, local)
+	remote, remoteRingDesc, err := m.tp.GossipSync(ctx, addr, local, &localRingDesc)
 	if err != nil {
 		return // seed unreachable - not fatal, try others
 	}
+
+	var ringCb func(RingDescriptor)
+	var ringDesc RingDescriptor
 
 	m.mu.Lock()
 	for _, u := range remote {
 		m.mergeLocked(u)
 	}
+	if remoteRingDesc != nil && remoteRingDesc.Version > m.ringDesc.Version {
+		m.applyRingDescLocked(*remoteRingDesc)
+		ringCb = m.onRingChange
+		ringDesc = m.ringDesc
+	}
 	m.mu.Unlock()
+
+	if ringCb != nil {
+		ringCb(ringDesc)
+	}
 }

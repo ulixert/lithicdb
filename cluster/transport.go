@@ -60,11 +60,13 @@ type MemberState struct {
 
 // PingMessage is the payload for SWIM Ping and Ping-Ack exchanges.
 // Updates are piggybacked gossip - recent state changes that should
-// be disseminated across the cluster.
+// be disseminated across the cluster. RingDesc is piggybacked so all
+// nodes converge on the latest ring descriptor within one gossip round.
 type PingMessage struct {
 	SenderID   string
 	SenderAddr string
 	Updates    []MemberState
+	RingDesc   *RingDescriptor // nil if no descriptor to share
 }
 
 // RingDescriptor is a versioned snapshot of ring membership.
@@ -97,7 +99,7 @@ type Transport interface {
 	PingReq(ctx context.Context, addr string, targetID, targetAddr string) (bool, error)
 
 	// GossipSync performs a full state exchange with the node at addr.
-	// Sends our full membership table and receives theirs. Used for
-	// initial discovery via seed peers.
-	GossipSync(ctx context.Context, addr string, members []MemberState) ([]MemberState, error)
+	// Sends our full membership table and ring descriptor, receives theirs.
+	// Used for initial discovery via seed peers.
+	GossipSync(ctx context.Context, addr string, members []MemberState, ringDesc *RingDescriptor) ([]MemberState, *RingDescriptor, error)
 }
