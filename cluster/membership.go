@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"math/rand/v2"
+	"sort"
 	"sync"
 	"time"
 )
@@ -795,15 +796,21 @@ func (m *Membership) queueBroadcastLocked(state MemberState) {
 	}
 }
 
-// getBroadcastsLocked returns up to limit updates for piggybacking.
+// getBroadcastsLocked returns up to limit updates for piggybacking,
+// prioritizing the freshest gossip (highest remaining retransmit count).
 // Only piggybacked items have their retransmit counters decremented;
-// items that didn't fit in this batch keep their full count for the
-// next round. Exhausted entries (retransmits <= 0) are removed.
+// items that didn't fit keep their full count for the next round.
+// Exhausted entries (retransmits <= 0) are removed.
 // Caller must hold m.mu (write lock — this mutates broadcasts).
 func (m *Membership) getBroadcastsLocked(limit int) []MemberState {
 	if len(m.broadcasts) == 0 {
 		return nil
 	}
+
+	// Sort by retransmit count descending - freshest gossip first.
+	sort.Slice(m.broadcasts, func(i, j int) bool {
+		return m.broadcasts[i].retransmits > m.broadcasts[j].retransmits
+	})
 
 	n := limit
 	if n > len(m.broadcasts) {
