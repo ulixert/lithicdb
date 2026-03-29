@@ -345,13 +345,14 @@ func (m *Membership) probe() {
 	// Collect broadcasts under write lock (getBroadcastsLocked mutates).
 	m.mu.Lock()
 	updates := m.getBroadcastsLocked(maxPiggyback)
+	localRingDesc := m.ringDesc
 	m.mu.Unlock()
 
 	resp, err := m.tp.Ping(ctx, target.Addr, &PingMessage{
 		SenderID:   m.selfID,
 		SenderAddr: m.cfg.Addr,
 		Updates:    updates,
-		RingDesc:   new(m.ringDesc),
+		RingDesc:   &localRingDesc,
 	})
 
 	if err == nil {
@@ -598,6 +599,32 @@ func (m *Membership) startSuspectTimerLocked(nodeID string) {
 	})
 }
 
+// --- Ring descriptor helpers ---
+
+// applyRingDescLocked applies a ring descriptor that the caller has
+// already verified is newer than m.ringDesc. Caller must hold m.mu.
+// Does NOT fire the onRingChange callback - caller must do that
+// outside the lock.
+func (m *Membership) applyRingDescLocked(rd RingDescriptor) {
+	ringMembers := make(map[string]RingState, len(rd.Members))
+	for _, rm := range rd.Members {
+		ringMembers[rm.NodeID] = rm.State
+	}
+
+	for nodeID, ms := range m.members {
+		newState, inRing := ringMembers[nodeID]
+		if !inRing {
+			newState = RingNone
+		}
+		if ms.Ring != newState {
+			ms.Ring = newState
+			m.queueBroadcastLocked(*ms)
+		}
+	}
+
+	m.ringDesc = rd
+}
+
 // --- Gossip merge ---
 
 // mergeLocked merges a remote member state update into the local table.
@@ -639,7 +666,7 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 	return false // stale
 }
 
-// --- Gossip broadcast queue ---
+// --- Gossip retransmit buffer ---
 
 // retransmitLimit returns how many times a broadcast should be
 // piggybacked: RetransmitMult * ceil(log2(N)).
@@ -657,7 +684,7 @@ func (m *Membership) queueBroadcastLocked(state MemberState) {
 		retransmits: m.retransmitLimit(),
 	})
 
-	// Cap queue size to prevent unbounded growth. Keep the most recent
+	// Cap buffer size to prevent unbounded growth. Keep the most recent
 	// entries (highest retransmit counts).
 	const maxBroadcasts = 128
 	if len(m.broadcasts) > maxBroadcasts {
