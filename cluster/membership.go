@@ -256,12 +256,15 @@ func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
 // HandlePing processes an incoming SWIM Ping, merges piggybacked
 // gossip updates and ring descriptor, and returns an ack with our own.
 func (m *Membership) HandlePing(msg *PingMessage) *PingMessage {
+	var events []livenessEvent
 	var ringCb func(RingDescriptor)
 	var ringDesc RingDescriptor
 
 	m.mu.Lock()
 	for _, u := range msg.Updates {
-		m.mergeLocked(u)
+		if ev := m.mergeLocked(u); ev != nil {
+			events = append(events, *ev)
+		}
 	}
 
 	// Apply piggybacked ring descriptor if newer.
@@ -273,12 +276,13 @@ func (m *Membership) HandlePing(msg *PingMessage) *PingMessage {
 
 	updates := m.getBroadcastsLocked(m.maxPiggyback())
 	localRingDesc := m.ringDesc
+	cb := m.onLivenessChange
 	m.mu.Unlock()
 
-	// Fire ring change callback outside the lock.
 	if ringCb != nil {
 		ringCb(ringDesc)
 	}
+	m.fireEvents(events, cb)
 
 	return &PingMessage{
 		SenderID:   m.selfID,
@@ -303,12 +307,17 @@ func (m *Membership) HandlePingReq(targetID, targetAddr string) bool {
 	}
 
 	// Merge any updates from the target's response.
+	var events []livenessEvent
 	m.mu.Lock()
 	for _, u := range resp.Updates {
-		m.mergeLocked(u)
+		if ev := m.mergeLocked(u); ev != nil {
+			events = append(events, *ev)
+		}
 	}
+	cb := m.onLivenessChange
 	m.mu.Unlock()
 
+	m.fireEvents(events, cb)
 	return true
 }
 
@@ -316,13 +325,16 @@ func (m *Membership) HandlePingReq(targetID, targetAddr string) bool {
 // remote's membership table and ring descriptor, returns our full table
 // and ring descriptor.
 func (m *Membership) HandleGossipSync(remote []MemberState, remoteRingDesc *RingDescriptor) ([]MemberState, *RingDescriptor) {
+	var events []livenessEvent
 	var ringCb func(RingDescriptor)
 	var ringDesc RingDescriptor
 
 	m.mu.Lock()
 
 	for _, u := range remote {
-		m.mergeLocked(u)
+		if ev := m.mergeLocked(u); ev != nil {
+			events = append(events, *ev)
+		}
 	}
 
 	// Apply remote ring descriptor if newer.
@@ -337,15 +349,26 @@ func (m *Membership) HandleGossipSync(remote []MemberState, remoteRingDesc *Ring
 		result = append(result, *ms)
 	}
 	localRingDesc := m.ringDesc
+	cb := m.onLivenessChange
 
 	m.mu.Unlock()
 
-	// Fire ring change callback outside the lock.
 	if ringCb != nil {
 		ringCb(ringDesc)
 	}
+	m.fireEvents(events, cb)
 
 	return result, &localRingDesc
+}
+
+// fireEvents invokes the liveness callback for each event.
+func (m *Membership) fireEvents(events []livenessEvent, cb func(string, LivenessState, LivenessState)) {
+	if cb == nil {
+		return
+	}
+	for _, ev := range events {
+		cb(ev.nodeID, ev.from, ev.to)
+	}
 }
 
 // --- SWIM probe loop ---
@@ -399,12 +422,13 @@ func (m *Membership) probe() {
 
 	if err == nil {
 		// Direct ping succeeded - merge response and ensure alive.
-		var event *livenessEvent
-		var cb func(string, LivenessState, LivenessState)
+		var events []livenessEvent
 
 		m.mu.Lock()
 		for _, u := range resp.Updates {
-			m.mergeLocked(u)
+			if ev := m.mergeLocked(u); ev != nil {
+				events = append(events, *ev)
+			}
 		}
 		// Apply piggybacked ring descriptor if newer.
 		var ringCb func(RingDescriptor)
@@ -416,31 +440,28 @@ func (m *Membership) probe() {
 		}
 		// If target was Suspect, transition back to Alive.
 		if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Suspect {
-			event = m.setLivenessLocked(target.NodeID, Alive)
-			cb = m.onLivenessChange
+			if ev := m.setLivenessLocked(target.NodeID, Alive); ev != nil {
+				events = append(events, *ev)
+			}
 		}
+		cb := m.onLivenessChange
 		m.mu.Unlock()
 
 		if ringCb != nil {
 			ringCb(ringDesc)
 		}
-		if event != nil && cb != nil {
-			cb(event.nodeID, event.from, event.to)
-		}
+		m.fireEvents(events, cb)
 		return
 	}
 
 	// Direct ping failed - try indirect pings.
 	if m.indirectPing(target) {
-		// Indirect ping succeeded.
-		var event *livenessEvent
-		var cb func(string, LivenessState, LivenessState)
-
 		m.mu.Lock()
+		var event *livenessEvent
 		if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Suspect {
 			event = m.setLivenessLocked(target.NodeID, Alive)
-			cb = m.onLivenessChange
 		}
+		cb := m.onLivenessChange
 		m.mu.Unlock()
 
 		if event != nil && cb != nil {
@@ -450,15 +471,13 @@ func (m *Membership) probe() {
 	}
 
 	// All pings failed - suspect the target.
-	var event *livenessEvent
-	var cb func(string, LivenessState, LivenessState)
-
 	m.mu.Lock()
+	var event *livenessEvent
 	if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Alive {
 		event = m.setLivenessLocked(target.NodeID, Suspect)
-		cb = m.onLivenessChange
 		m.startSuspectTimerLocked(target.NodeID)
 	}
+	cb := m.onLivenessChange
 	m.mu.Unlock()
 
 	if event != nil && cb != nil {
@@ -623,20 +642,16 @@ func (m *Membership) startSuspectTimerLocked(nodeID string) {
 	}
 
 	m.suspectTimers[nodeID] = time.AfterFunc(m.cfg.SuspectTimeout, func() {
-		var event *livenessEvent
-		var cb func(string, LivenessState, LivenessState)
-
 		m.mu.Lock()
 		ms, ok := m.members[nodeID]
 		if !ok || ms.Liveness != Suspect {
 			m.mu.Unlock()
 			return // already refuted or removed
 		}
-		event = m.setLivenessLocked(nodeID, Dead)
-		cb = m.onLivenessChange
+		event := m.setLivenessLocked(nodeID, Dead)
+		cb := m.onLivenessChange
 		m.mu.Unlock()
 
-		// Fire callback outside the lock.
 		if event != nil && cb != nil {
 			cb(event.nodeID, event.from, event.to)
 		}
@@ -705,15 +720,20 @@ func (m *Membership) applyRingDescLocked(rd RingDescriptor) {
 // --- Gossip merge ---
 
 // mergeLocked merges a remote member state update into the local table.
-// Returns true if the update was applied (newer than local state).
+// Returns a *livenessEvent if the merge caused a liveness transition
+// (so the caller can fire the callback outside the lock), or nil.
 //
 // Ring state is NOT merged from gossip. It is authoritative only from
-// the RingDescriptor. This prevents a stale gossip update (from a node
-// that hasn't seen the latest descriptor) from overwriting the correct
-// ring state.
+// the RingDescriptor. This prevents a stale gossip update from
+// overwriting the correct ring state.
+//
+// Liveness changes are routed through setLivenessLocked, so all side
+// effects (deadSince tracking, suspect timer cancelatioon, memberGen
+// increment, broadcast queueing) happen in one place - whether the
+// change was detected locally or learned via gossip.
 //
 // Caller must hold m.mu.
-func (m *Membership) mergeLocked(remote MemberState) bool {
+func (m *Membership) mergeLocked(remote MemberState) *livenessEvent {
 	local, exists := m.members[remote.NodeID]
 
 	if !exists {
@@ -723,7 +743,14 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 		state.Ring = m.ringStateFromDescriptor(remote.NodeID)
 		m.members[remote.NodeID] = &state
 		m.memberGen++
-		return true
+		// New node with non-Alive state → record via setLivenessLocked
+		// for proper deadSince tracking. But the node was just added,
+		// so there's no "from" state to transition from - only track
+		// Dead for reaping.
+		if state.Liveness == Dead {
+			m.deadSince[remote.NodeID] = time.Now()
+		}
+		return nil
 	}
 
 	// Self-refutation: if someone thinks we're Suspect or Dead,
@@ -734,28 +761,55 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 			local.Liveness = Alive
 			m.queueBroadcastLocked(*local)
 		}
-		return false // we refuted - the remote state was not applied
+		return nil
 	}
 
 	// Higher incarnation always wins for liveness + addr.
 	// Ring state is preserved - only the RingDescriptor can change it.
 	if remote.Incarnation > local.Incarnation {
+		oldLiveness := local.Liveness
 		localRing := local.Ring
 		*local = remote
 		local.Ring = localRing
+		if local.Liveness != oldLiveness {
+			return m.applyLivenessChange(remote.NodeID, oldLiveness, local.Liveness)
+		}
 		m.memberGen++
-		return true
+		return nil
 	}
 
 	// Same incarnation: higher liveness state wins (Dead > Suspect > Alive).
-	// This ensures convergence toward detecting failures.
 	if remote.Incarnation == local.Incarnation && remote.Liveness > local.Liveness {
-		local.Liveness = remote.Liveness
-		m.memberGen++
-		return true
+		return m.setLivenessLocked(remote.NodeID, remote.Liveness)
 	}
 
-	return false // stale
+	return nil
+}
+
+// applyLivenessChange handles the side effects of a liveness transition
+// that was applied by field copy (not via setLivenessLocked). This is
+// needed when mergeLocked does `*local = remote` for a higher incarnation,
+// which overwrites liveness as part of the full struct copy.
+func (m *Membership) applyLivenessChange(nodeID string, from, to LivenessState) *livenessEvent {
+	m.memberGen++
+
+	if to == Dead {
+		m.deadSince[nodeID] = time.Now()
+	} else {
+		delete(m.deadSince, nodeID)
+	}
+
+	if from == Suspect {
+		if timer, ok := m.suspectTimers[nodeID]; ok {
+			timer.Stop()
+			delete(m.suspectTimers, nodeID)
+		}
+	}
+
+	ms := m.members[nodeID]
+	m.queueBroadcastLocked(*ms)
+
+	return &livenessEvent{nodeID: nodeID, from: from, to: to}
 }
 
 // ringStateFromDescriptor looks up the ring state for a node from the
@@ -862,21 +916,26 @@ func (m *Membership) syncWithPeer(ctx context.Context, addr string) {
 		return // seed unreachable - not fatal, try others
 	}
 
+	var events []livenessEvent
 	var ringCb func(RingDescriptor)
 	var ringDesc RingDescriptor
 
 	m.mu.Lock()
 	for _, u := range remote {
-		m.mergeLocked(u)
+		if ev := m.mergeLocked(u); ev != nil {
+			events = append(events, *ev)
+		}
 	}
 	if remoteRingDesc != nil && remoteRingDesc.Version > m.ringDesc.Version {
 		m.applyRingDescLocked(*remoteRingDesc)
 		ringCb = m.onRingChange
 		ringDesc = m.ringDesc
 	}
+	cb := m.onLivenessChange
 	m.mu.Unlock()
 
 	if ringCb != nil {
 		ringCb(ringDesc)
 	}
+	m.fireEvents(events, cb)
 }
