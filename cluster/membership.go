@@ -31,8 +31,9 @@ type Membership struct {
 	members map[string]*MemberState // nodeID → state
 	selfID  string
 
-	// Gossip broadcast queue - recent state changes to piggyback
-	// on outgoing messages.
+	// Gossip retransmit buffer - recent state changes to piggyback
+	// on outgoing messages. Items stay until their retransmit counter
+	// reaches zero (infection-style dissemination).
 	broadcasts []broadcast
 
 	// Suspect timers - one per suspected node. Fires SuspectTimeout
@@ -45,9 +46,10 @@ type Membership struct {
 	probeIdx   int
 
 	// Ring descriptor - versioned, only mutated by admin commands.
+	// Disseminated via gossip piggybacking on ping/ack and GossipSync.
 	ringDesc RingDescriptor
 
-	// Callbacks
+	// Callbacks - fired outside the lock to prevent deadlocks.
 	onLivenessChange func(nodeID string, from, to LivenessState)
 	onRingChange     func(RingDescriptor)
 
@@ -326,9 +328,10 @@ func (m *Membership) probe() {
 	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.PingTimeout)
 	defer cancel()
 
-	m.mu.RLock()
+	// Collect broadcasts under write lock (getBroadcastsLocked mutates).
+	m.mu.Lock()
 	updates := m.getBroadcastsLocked(maxPiggyback)
-	m.mu.RUnlock()
+	m.mu.Unlock()
 
 	resp, err := m.tp.Ping(ctx, target.Addr, &PingMessage{
 		SenderID:   m.selfID,
