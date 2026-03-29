@@ -276,10 +276,20 @@ var LithicDB_ServiceDesc = grpc.ServiceDesc{
 	Metadata: "proto/lithicpb/lithic.proto",
 }
 
+const (
+	InternalService_Ping_FullMethodName       = "/lithicpb.InternalService/Ping"
+	InternalService_PingReq_FullMethodName    = "/lithicpb.InternalService/PingReq"
+	InternalService_GossipSync_FullMethodName = "/lithicpb.InternalService/GossipSync"
+)
+
 // InternalServiceClient is the client API for InternalService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type InternalServiceClient interface {
+	// SWIM protocol RPCs
+	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
+	PingReq(ctx context.Context, in *PingReqRequest, opts ...grpc.CallOption) (*PingReqResponse, error)
+	GossipSync(ctx context.Context, in *GossipSyncRequest, opts ...grpc.CallOption) (*GossipSyncResponse, error)
 }
 
 type internalServiceClient struct {
@@ -290,10 +300,44 @@ func NewInternalServiceClient(cc grpc.ClientConnInterface) InternalServiceClient
 	return &internalServiceClient{cc}
 }
 
+func (c *internalServiceClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PingResponse)
+	err := c.cc.Invoke(ctx, InternalService_Ping_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalServiceClient) PingReq(ctx context.Context, in *PingReqRequest, opts ...grpc.CallOption) (*PingReqResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PingReqResponse)
+	err := c.cc.Invoke(ctx, InternalService_PingReq_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalServiceClient) GossipSync(ctx context.Context, in *GossipSyncRequest, opts ...grpc.CallOption) (*GossipSyncResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GossipSyncResponse)
+	err := c.cc.Invoke(ctx, InternalService_GossipSync_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InternalServiceServer is the server API for InternalService service.
 // All implementations must embed UnimplementedInternalServiceServer
 // for forward compatibility.
 type InternalServiceServer interface {
+	// SWIM protocol RPCs
+	Ping(context.Context, *PingRequest) (*PingResponse, error)
+	PingReq(context.Context, *PingReqRequest) (*PingReqResponse, error)
+	GossipSync(context.Context, *GossipSyncRequest) (*GossipSyncResponse, error)
 	mustEmbedUnimplementedInternalServiceServer()
 }
 
@@ -304,6 +348,15 @@ type InternalServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedInternalServiceServer struct{}
 
+func (UnimplementedInternalServiceServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Ping not implemented")
+}
+func (UnimplementedInternalServiceServer) PingReq(context.Context, *PingReqRequest) (*PingReqResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PingReq not implemented")
+}
+func (UnimplementedInternalServiceServer) GossipSync(context.Context, *GossipSyncRequest) (*GossipSyncResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GossipSync not implemented")
+}
 func (UnimplementedInternalServiceServer) mustEmbedUnimplementedInternalServiceServer() {}
 func (UnimplementedInternalServiceServer) testEmbeddedByValue()                         {}
 
@@ -325,21 +378,101 @@ func RegisterInternalServiceServer(s grpc.ServiceRegistrar, srv InternalServiceS
 	s.RegisterService(&InternalService_ServiceDesc, srv)
 }
 
+func _InternalService_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).Ping(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_Ping_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).Ping(ctx, req.(*PingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InternalService_PingReq_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PingReqRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).PingReq(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_PingReq_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).PingReq(ctx, req.(*PingReqRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InternalService_GossipSync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GossipSyncRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).GossipSync(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_GossipSync_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).GossipSync(ctx, req.(*GossipSyncRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InternalService_ServiceDesc is the grpc.ServiceDesc for InternalService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var InternalService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "lithicpb.InternalService",
 	HandlerType: (*InternalServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
-	Streams:     []grpc.StreamDesc{},
-	Metadata:    "proto/lithicpb/lithic.proto",
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Ping",
+			Handler:    _InternalService_Ping_Handler,
+		},
+		{
+			MethodName: "PingReq",
+			Handler:    _InternalService_PingReq_Handler,
+		},
+		{
+			MethodName: "GossipSync",
+			Handler:    _InternalService_GossipSync_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "proto/lithicpb/lithic.proto",
 }
+
+const (
+	AdminService_GetNodeInfo_FullMethodName      = "/lithicpb.AdminService/GetNodeInfo"
+	AdminService_GetClusterStatus_FullMethodName = "/lithicpb.AdminService/GetClusterStatus"
+	AdminService_JoinRing_FullMethodName         = "/lithicpb.AdminService/JoinRing"
+	AdminService_ActivateNode_FullMethodName     = "/lithicpb.AdminService/ActivateNode"
+	AdminService_RemoveNode_FullMethodName       = "/lithicpb.AdminService/RemoveNode"
+)
 
 // AdminServiceClient is the client API for AdminService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AdminServiceClient interface {
+	GetNodeInfo(ctx context.Context, in *GetNodeInfoRequest, opts ...grpc.CallOption) (*GetNodeInfoResponse, error)
+	GetClusterStatus(ctx context.Context, in *GetClusterStatusRequest, opts ...grpc.CallOption) (*GetClusterStatusResponse, error)
+	JoinRing(ctx context.Context, in *JoinRingRequest, opts ...grpc.CallOption) (*JoinRingResponse, error)
+	ActivateNode(ctx context.Context, in *ActivateNodeRequest, opts ...grpc.CallOption) (*ActivateNodeResponse, error)
+	RemoveNode(ctx context.Context, in *RemoveNodeRequest, opts ...grpc.CallOption) (*RemoveNodeResponse, error)
 }
 
 type adminServiceClient struct {
@@ -350,10 +483,65 @@ func NewAdminServiceClient(cc grpc.ClientConnInterface) AdminServiceClient {
 	return &adminServiceClient{cc}
 }
 
+func (c *adminServiceClient) GetNodeInfo(ctx context.Context, in *GetNodeInfoRequest, opts ...grpc.CallOption) (*GetNodeInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetNodeInfoResponse)
+	err := c.cc.Invoke(ctx, AdminService_GetNodeInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) GetClusterStatus(ctx context.Context, in *GetClusterStatusRequest, opts ...grpc.CallOption) (*GetClusterStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetClusterStatusResponse)
+	err := c.cc.Invoke(ctx, AdminService_GetClusterStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) JoinRing(ctx context.Context, in *JoinRingRequest, opts ...grpc.CallOption) (*JoinRingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JoinRingResponse)
+	err := c.cc.Invoke(ctx, AdminService_JoinRing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) ActivateNode(ctx context.Context, in *ActivateNodeRequest, opts ...grpc.CallOption) (*ActivateNodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActivateNodeResponse)
+	err := c.cc.Invoke(ctx, AdminService_ActivateNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) RemoveNode(ctx context.Context, in *RemoveNodeRequest, opts ...grpc.CallOption) (*RemoveNodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveNodeResponse)
+	err := c.cc.Invoke(ctx, AdminService_RemoveNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminServiceServer is the server API for AdminService service.
 // All implementations must embed UnimplementedAdminServiceServer
 // for forward compatibility.
 type AdminServiceServer interface {
+	GetNodeInfo(context.Context, *GetNodeInfoRequest) (*GetNodeInfoResponse, error)
+	GetClusterStatus(context.Context, *GetClusterStatusRequest) (*GetClusterStatusResponse, error)
+	JoinRing(context.Context, *JoinRingRequest) (*JoinRingResponse, error)
+	ActivateNode(context.Context, *ActivateNodeRequest) (*ActivateNodeResponse, error)
+	RemoveNode(context.Context, *RemoveNodeRequest) (*RemoveNodeResponse, error)
 	mustEmbedUnimplementedAdminServiceServer()
 }
 
@@ -364,6 +552,21 @@ type AdminServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAdminServiceServer struct{}
 
+func (UnimplementedAdminServiceServer) GetNodeInfo(context.Context, *GetNodeInfoRequest) (*GetNodeInfoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetNodeInfo not implemented")
+}
+func (UnimplementedAdminServiceServer) GetClusterStatus(context.Context, *GetClusterStatusRequest) (*GetClusterStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetClusterStatus not implemented")
+}
+func (UnimplementedAdminServiceServer) JoinRing(context.Context, *JoinRingRequest) (*JoinRingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method JoinRing not implemented")
+}
+func (UnimplementedAdminServiceServer) ActivateNode(context.Context, *ActivateNodeRequest) (*ActivateNodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ActivateNode not implemented")
+}
+func (UnimplementedAdminServiceServer) RemoveNode(context.Context, *RemoveNodeRequest) (*RemoveNodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveNode not implemented")
+}
 func (UnimplementedAdminServiceServer) mustEmbedUnimplementedAdminServiceServer() {}
 func (UnimplementedAdminServiceServer) testEmbeddedByValue()                      {}
 
@@ -385,13 +588,124 @@ func RegisterAdminServiceServer(s grpc.ServiceRegistrar, srv AdminServiceServer)
 	s.RegisterService(&AdminService_ServiceDesc, srv)
 }
 
+func _AdminService_GetNodeInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNodeInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).GetNodeInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_GetNodeInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).GetNodeInfo(ctx, req.(*GetNodeInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_GetClusterStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetClusterStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).GetClusterStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_GetClusterStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).GetClusterStatus(ctx, req.(*GetClusterStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_JoinRing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JoinRingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).JoinRing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_JoinRing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).JoinRing(ctx, req.(*JoinRingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_ActivateNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ActivateNodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ActivateNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ActivateNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ActivateNode(ctx, req.(*ActivateNodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_RemoveNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveNodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).RemoveNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_RemoveNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).RemoveNode(ctx, req.(*RemoveNodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminService_ServiceDesc is the grpc.ServiceDesc for AdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AdminService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "lithicpb.AdminService",
 	HandlerType: (*AdminServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
-	Streams:     []grpc.StreamDesc{},
-	Metadata:    "proto/lithicpb/lithic.proto",
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetNodeInfo",
+			Handler:    _AdminService_GetNodeInfo_Handler,
+		},
+		{
+			MethodName: "GetClusterStatus",
+			Handler:    _AdminService_GetClusterStatus_Handler,
+		},
+		{
+			MethodName: "JoinRing",
+			Handler:    _AdminService_JoinRing_Handler,
+		},
+		{
+			MethodName: "ActivateNode",
+			Handler:    _AdminService_ActivateNode_Handler,
+		},
+		{
+			MethodName: "RemoveNode",
+			Handler:    _AdminService_RemoveNode_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "proto/lithicpb/lithic.proto",
 }

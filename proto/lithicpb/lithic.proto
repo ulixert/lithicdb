@@ -57,8 +57,112 @@ message BatchWriteResponse {}
 
 // ---- Node-to-node data plane ----
 
-service InternalService {}
+service InternalService {
+  // SWIM protocol RPCs
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc PingReq(PingReqRequest) returns (PingReqResponse);
+  rpc GossipSync(GossipSyncRequest) returns (GossipSyncResponse);
+}
+
+// SWIM Ping - direct probe with piggybacked gossip updates and ring descriptor.
+message PingRequest {
+  string sender_id   = 1;
+  string sender_addr = 2;
+  repeated MemberUpdateProto updates = 3;
+  RingDescriptorProto ring_descriptor = 4;  // piggybacked for fast convergence
+}
+
+message PingResponse {
+  string sender_id   = 1;
+  string sender_addr = 2;
+  repeated MemberUpdateProto updates = 3;
+  RingDescriptorProto ring_descriptor = 4;  // piggybacked for fast convergence
+}
+
+// SWIM PingReq - indirect probe: ask an intermediary to ping the target.
+message PingReqRequest {
+  string target_id   = 1;
+  string target_addr = 2;
+}
+
+message PingReqResponse {
+  bool ack = 1;
+}
+
+// GossipSync — full membership table exchange for discovery.
+message GossipSyncRequest {
+  string sender_id   = 1;
+  string sender_addr = 2;
+  repeated MemberUpdateProto members = 3;
+  RingDescriptorProto ring_descriptor = 4;  // include ring for full state exchange
+}
+
+message GossipSyncResponse {
+  repeated MemberUpdateProto members = 1;
+  RingDescriptorProto ring_descriptor = 2;  // include ring for full state exchange
+}
+
+// MemberUpdateProto carries the gossip state for a single member.
+message MemberUpdateProto {
+  string node_id     = 1;
+  string addr        = 2;
+  int32  liveness    = 3;  // 0=alive, 1=suspect, 2=dead
+  int32  ring_state  = 4;  // 0=none, 1=joining, 2=active
+  uint64 incarnation = 5;
+}
+
+// Ring descriptor - versioned, only changed by admin commands.
+message RingDescriptorProto {
+  uint64 version = 1;
+  repeated RingMemberProto members = 2;
+}
+
+message RingMemberProto {
+  string node_id    = 1;
+  string addr       = 2;
+  int32  ring_state = 3;  // 0=joining, 1=active
+}
 
 // ---- Operator topology management ----
 
-service AdminService {}
+service AdminService {
+  rpc GetNodeInfo(GetNodeInfoRequest) returns (GetNodeInfoResponse);
+  rpc GetClusterStatus(GetClusterStatusRequest) returns (GetClusterStatusResponse);
+  rpc JoinRing(JoinRingRequest) returns (JoinRingResponse);
+  rpc ActivateNode(ActivateNodeRequest) returns (ActivateNodeResponse);
+  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+}
+
+message GetNodeInfoRequest {}
+message GetNodeInfoResponse {
+  string node_id    = 1;
+  string addr       = 2;
+  int32  liveness   = 3;
+  int32  ring_state = 4;
+}
+
+message GetClusterStatusRequest {}
+message GetClusterStatusResponse {
+  repeated MemberUpdateProto members = 1;
+  RingDescriptorProto ring_descriptor = 2;
+}
+
+message JoinRingRequest {
+  string addr = 1;              // address of the node to join
+  uint64 expected_version = 2;  // CAS guard: current ring descriptor version the caller expects
+}
+message JoinRingResponse {
+  string node_id = 1;
+}
+
+message ActivateNodeRequest {
+  string node_id = 1;
+  uint64 expected_version = 2;  // CAS guard: current ring descriptor version the caller expects
+}
+message ActivateNodeResponse {}
+
+message RemoveNodeRequest {
+  string node_id = 1;
+  uint64 expected_version = 2;  // CAS guard: current ring descriptor version the caller expects
+}
+message RemoveNodeResponse {}
