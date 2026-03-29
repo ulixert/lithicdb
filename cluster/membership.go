@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"math"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -233,6 +234,66 @@ func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
 	return nil
 }
 
+// --- Incoming RPC handlers ---
+
+// HandlePing processes an incoming SWIM Ping, merges piggybacked
+// gossip updates, and returns an ack with our own updates.
+func (m *Membership) HandlePing(msg *PingMessage) *PingMessage {
+	m.mu.Lock()
+	for _, u := range msg.Updates {
+		m.mergeLocked(u)
+	}
+	updates := m.getBroadcastsLocked(maxPiggyback)
+	m.mu.Unlock()
+
+	return &PingMessage{
+		SenderID:   m.selfID,
+		SenderAddr: m.cfg.Addr,
+		Updates:    updates,
+	}
+}
+
+// HandlePingReq processes an indirect ping request: ping the target
+// on behalf of the requester and report whether it acked.
+func (m *Membership) HandlePingReq(targetID, targetAddr string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.PingTimeout)
+	defer cancel()
+
+	resp, err := m.tp.Ping(ctx, targetAddr, &PingMessage{
+		SenderID:   m.selfID,
+		SenderAddr: m.cfg.Addr,
+	})
+	if err != nil {
+		return false
+	}
+
+	// Merge any updates from the target's response.
+	m.mu.Lock()
+	for _, u := range resp.Updates {
+		m.mergeLocked(u)
+	}
+	m.mu.Unlock()
+
+	return true
+}
+
+// HandleGossipSync processes a full state exchange. Merges the
+// remote's membership table and returns our full table.
+func (m *Membership) HandleGossipSync(remote []MemberState) []MemberState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, u := range remote {
+		m.mergeLocked(u)
+	}
+
+	result := make([]MemberState, 0, len(m.members))
+	for _, ms := range m.members {
+		result = append(result, *ms)
+	}
+	return result
+}
+
 // --- SWIM probe loop ---
 
 const maxPiggyback = 10 // max gossip updates per message
@@ -307,6 +368,118 @@ func (m *Membership) probe() {
 		m.startSuspectTimerLocked(target.NodeID)
 	}
 	m.mu.Unlock()
+}
+
+// indirectPing asks up to K random alive peers to ping the target
+// on our behalf. Returns true if any peer reports success.
+func (m *Membership) indirectPing(target *MemberState) bool {
+	m.mu.RLock()
+	peers := m.randomAlivePeersLocked(m.cfg.IndirectPeers, target.NodeID)
+	m.mu.RUnlock()
+
+	if len(peers) == 0 {
+		return false
+	}
+
+	type result struct{ ack bool }
+	results := make(chan result, len(peers))
+
+	for _, peer := range peers {
+		go func(addr string) {
+			ctx, cancel := context.WithTimeout(context.Background(), m.cfg.PingTimeout)
+			defer cancel()
+			ack, err := m.tp.PingReq(ctx, addr, target.NodeID, target.Addr)
+			results <- result{ack: err == nil && ack}
+		}(peer.Addr)
+	}
+
+	for range peers {
+		r := <-results
+		if r.ack {
+			return true
+		}
+	}
+
+	return false
+}
+
+// nextProbeTarget returns the next member to probe using round-robin
+// over a shuffled list. Returns nil if there are no probe targets.
+func (m *Membership) nextProbeTarget() *MemberState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Rebuild probe order if needed (membership changed or exhausted).
+	if m.probeIdx >= len(m.probeOrder) || m.probeOrderStale() {
+		m.rebuildProbeOrderLocked()
+	}
+
+	if len(m.probeOrder) == 0 {
+		return nil
+	}
+
+	nodeID := m.probeOrder[m.probeIdx]
+	m.probeIdx++
+
+	ms, ok := m.members[nodeID]
+	if !ok || ms.Liveness == Dead {
+		// Skip dead or removed nodes - try the next one.
+		// Recursive but bounded by probe order length.
+		return m.nextProbeTargetLocked()
+	}
+
+	return new(*ms)
+}
+
+func (m *Membership) nextProbeTargetLocked() *MemberState {
+	for m.probeIdx < len(m.probeOrder) {
+		nodeID := m.probeOrder[m.probeIdx]
+		m.probeIdx++
+		if ms, ok := m.members[nodeID]; ok && ms.Liveness != Dead {
+			return new(*ms)
+		}
+	}
+	return nil
+}
+
+func (m *Membership) probeOrderStale() bool {
+	// Stale if the member count (excluding self and dead) doesn't match.
+	count := 0
+	for id, ms := range m.members {
+		if id != m.selfID && ms.Liveness != Dead {
+			count++
+		}
+	}
+	return count != len(m.probeOrder)
+}
+
+func (m *Membership) rebuildProbeOrderLocked() {
+	m.probeOrder = m.probeOrder[:0]
+	for id, ms := range m.members {
+		if id != m.selfID && ms.Liveness != Dead {
+			m.probeOrder = append(m.probeOrder, id)
+		}
+	}
+	rand.Shuffle(len(m.probeOrder), func(i, j int) {
+		m.probeOrder[i], m.probeOrder[j] = m.probeOrder[j], m.probeOrder[i]
+	})
+	m.probeIdx = 0
+}
+
+func (m *Membership) randomAlivePeersLocked(k int, excludeID string) []MemberState {
+	var candidates []MemberState
+	for id, ms := range m.members {
+		if id != m.selfID && id != excludeID && ms.Liveness == Alive {
+			candidates = append(candidates, *ms)
+		}
+	}
+	rand.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	})
+	if len(candidates) > k {
+		candidates = candidates[:k]
+	}
+	return candidates
 }
 
 // --- State transitions ---
