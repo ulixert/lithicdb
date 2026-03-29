@@ -704,13 +704,22 @@ func (m *Membership) applyRingDescLocked(rd RingDescriptor) {
 
 // mergeLocked merges a remote member state update into the local table.
 // Returns true if the update was applied (newer than local state).
+//
+// Ring state is NOT merged from gossip. It is authoritative only from
+// the RingDescriptor. This prevents a stale gossip update (from a node
+// that hasn't seen the latest descriptor) from overwriting the correct
+// ring state.
+//
 // Caller must hold m.mu.
 func (m *Membership) mergeLocked(remote MemberState) bool {
 	local, exists := m.members[remote.NodeID]
 
 	if !exists {
-		// New node - accept unconditionally.
-		m.members[remote.NodeID] = new(remote)
+		// New node - accept unconditionally, but set ring state
+		// from our ring descriptor (not from the gossip update).
+		state := remote
+		state.Ring = m.ringStateFromDescriptor(remote.NodeID)
+		m.members[remote.NodeID] = &state
 		m.memberGen++
 		return true
 	}
@@ -726,9 +735,12 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 		return false // we refuted - the remote state was not applied
 	}
 
-	// Higher incarnation always wins.
+	// Higher incarnation always wins for liveness + addr.
+	// Ring state is preserved - only the RingDescriptor can change it.
 	if remote.Incarnation > local.Incarnation {
+		localRing := local.Ring
 		*local = remote
+		local.Ring = localRing
 		m.memberGen++
 		return true
 	}
@@ -742,6 +754,17 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 	}
 
 	return false // stale
+}
+
+// ringStateFromDescriptor looks up the ring state for a node from the
+// current ring descriptor. Returns RingNone if the node is not in the ring.
+func (m *Membership) ringStateFromDescriptor(nodeID string) RingState {
+	for _, rm := range m.ringDesc.Members {
+		if rm.NodeID == nodeID {
+			return rm.State
+		}
+	}
+	return RingNone
 }
 
 // --- Gossip retransmit buffer ---
