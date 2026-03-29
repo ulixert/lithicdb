@@ -50,8 +50,14 @@ type Membership struct {
 
 	// Probe target ordering - round-robin over a shuffled list.
 	// Re-shuffled when a full round completes or membership changes.
-	probeOrder []string // nodeIDs
-	probeIdx   int
+	probeOrder    []string // nodeIDs
+	probeIdx      int
+	probeOrderGen uint64 // generation when probe order was last built
+
+	// memberGen increments on every membership change (add, liveness
+	// transition). Used to detect when the probe order is stale
+	// without the ABA problem of counting members.
+	memberGen uint64
 
 	// Ring descriptor - versioned, only mutated by admin commands.
 	// Disseminated via gossip piggybacking on ping/ack and GossipSync.
@@ -227,30 +233,7 @@ func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
 		return nil // stale, ignore
 	}
 
-	// Build a set of ring members from the new descriptor.
-	ringMembers := make(map[string]RingState, len(rd.Members))
-	for _, rm := range rd.Members {
-		ringMembers[rm.NodeID] = rm.State
-	}
-
-	// Update member ring states.
-	// Ring state is NOT propagated via incarnation - incarnation is purely
-	// a SWIM liveness concept (only a node increments its own incarnation
-	// to refute suspicion). Ring state is conveyed via the RingDescriptor's
-	// Version field. We still broadcast the updated member so peers learn
-	// the ring state change, but without bumping incarnation.
-	for nodeID, ms := range m.members {
-		newState, inRing := ringMembers[nodeID]
-		if !inRing {
-			newState = RingNone
-		}
-		if ms.Ring != newState {
-			ms.Ring = newState
-			m.queueBroadcastLocked(*ms)
-		}
-	}
-
-	m.ringDesc = rd
+	m.applyRingDescLocked(rd)
 	ringCb = m.onRingChange
 
 	m.mu.Unlock()
@@ -513,8 +496,8 @@ func (m *Membership) nextProbeTarget() *MemberState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Rebuild probe order if needed (membership changed or exhausted).
-	if m.probeIdx >= len(m.probeOrder) || m.probeOrderStale() {
+	// Rebuild probe order if exhausted or membership changed.
+	if m.probeIdx >= len(m.probeOrder) || m.probeOrderGen != m.memberGen {
 		m.rebuildProbeOrderLocked()
 	}
 
@@ -545,17 +528,6 @@ func (m *Membership) nextProbeTargetLocked() *MemberState {
 	return nil
 }
 
-func (m *Membership) probeOrderStale() bool {
-	// Stale if the member count (excluding self and dead) doesn't match.
-	count := 0
-	for id, ms := range m.members {
-		if id != m.selfID && ms.Liveness != Dead {
-			count++
-		}
-	}
-	return count != len(m.probeOrder)
-}
-
 func (m *Membership) rebuildProbeOrderLocked() {
 	m.probeOrder = m.probeOrder[:0]
 	for id, ms := range m.members {
@@ -567,6 +539,7 @@ func (m *Membership) rebuildProbeOrderLocked() {
 		m.probeOrder[i], m.probeOrder[j] = m.probeOrder[j], m.probeOrder[i]
 	})
 	m.probeIdx = 0
+	m.probeOrderGen = m.memberGen
 }
 
 func (m *Membership) randomAlivePeersLocked(k int, excludeID string) []MemberState {
@@ -607,6 +580,7 @@ func (m *Membership) setLivenessLocked(nodeID string, to LivenessState) *livenes
 	}
 
 	ms.Liveness = to
+	m.memberGen++
 
 	// Cancel suspect timer if transitioning away from Suspect.
 	if from == Suspect {
@@ -685,6 +659,7 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 	if !exists {
 		// New node - accept unconditionally.
 		m.members[remote.NodeID] = new(remote)
+		m.memberGen++
 		return true
 	}
 
@@ -702,6 +677,7 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 	// Higher incarnation always wins.
 	if remote.Incarnation > local.Incarnation {
 		*local = remote
+		m.memberGen++
 		return true
 	}
 
@@ -709,6 +685,7 @@ func (m *Membership) mergeLocked(remote MemberState) bool {
 	// This ensures convergence toward detecting failures.
 	if remote.Incarnation == local.Incarnation && remote.Liveness > local.Liveness {
 		local.Liveness = remote.Liveness
+		m.memberGen++
 		return true
 	}
 
