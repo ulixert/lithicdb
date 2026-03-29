@@ -3,17 +3,25 @@ package cluster
 import (
 	"context"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"time"
 )
 
-// broadcast is an entry in the gossip dissemination queue.
+// broadcast is an entry in the gossip retransmit buffer.
 // Each state change is piggybacked on outgoing messages until
 // the retransmit counter reaches zero.
 type broadcast struct {
 	state       MemberState
 	retransmits int
+}
+
+// livenessEvent captures a liveness transition for deferred callback
+// invocation outside the membership lock.
+type livenessEvent struct {
+	nodeID string
+	from   LivenessState
+	to     LivenessState
 }
 
 // Membership implements the SWIM protocol for decentralized failure
@@ -112,8 +120,7 @@ func (m *Membership) Stop() {
 }
 
 // OnLivenessChange registers a callback invoked when a node's liveness
-// state changes. The callback is called under the membership lock -
-// it must not block.
+// state changes. The callback is fired outside the membership lock.
 func (m *Membership) OnLivenessChange(fn func(nodeID string, from, to LivenessState)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -121,7 +128,7 @@ func (m *Membership) OnLivenessChange(fn func(nodeID string, from, to LivenessSt
 }
 
 // OnRingChange registers a callback invoked when the ring descriptor
-// changes. The callback is called under the membership lock.
+// changes. The callback is fired outside the membership lock.
 func (m *Membership) OnRingChange(fn func(RingDescriptor)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -196,11 +203,14 @@ func (m *Membership) GetRingDescriptor() RingDescriptor {
 // ApplyRingDescriptor applies a new ring descriptor if its version
 // is higher than the current one. Updates member ring states and
 // queues gossip broadcasts for each changed member.
+// The onRingChange callback is fired outside the lock.
 func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
+	var ringCb func(RingDescriptor)
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if rd.Version <= m.ringDesc.Version {
+		m.mu.Unlock()
 		return nil // stale, ignore
 	}
 
@@ -228,9 +238,13 @@ func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
 	}
 
 	m.ringDesc = rd
+	ringCb = m.onRingChange
 
-	if m.onRingChange != nil {
-		m.onRingChange(rd)
+	m.mu.Unlock()
+
+	// Fire callback outside the lock to prevent deadlocks.
+	if ringCb != nil {
+		ringCb(rd)
 	}
 
 	return nil
@@ -487,15 +501,23 @@ func (m *Membership) randomAlivePeersLocked(k int, excludeID string) []MemberSta
 
 // --- State transitions ---
 
-func (m *Membership) setLivenessLocked(nodeID string, to LivenessState) {
+// setLivenessLocked transitions a node's liveness state and returns
+// a livenessEvent for deferred callback invocation. Returns nil if
+// no transition occurred.
+//
+// Incarnation is NOT bumped - in SWIM, only a node itself increments
+// its own incarnation (to refute suspicion). Liveness changes by
+// other nodes are resolved via the merge rule: at the same incarnation,
+// higher liveness state wins (Dead > Suspect > Alive).
+func (m *Membership) setLivenessLocked(nodeID string, to LivenessState) *livenessEvent {
 	ms, ok := m.members[nodeID]
 	if !ok {
-		return
+		return nil
 	}
 
 	from := ms.Liveness
 	if from == to {
-		return
+		return nil
 	}
 
 	ms.Liveness = to
@@ -510,9 +532,7 @@ func (m *Membership) setLivenessLocked(nodeID string, to LivenessState) {
 
 	m.queueBroadcastLocked(*ms)
 
-	if m.onLivenessChange != nil {
-		m.onLivenessChange(nodeID, from, to)
-	}
+	return &livenessEvent{nodeID: nodeID, from: from, to: to}
 }
 
 func (m *Membership) startSuspectTimerLocked(nodeID string) {
