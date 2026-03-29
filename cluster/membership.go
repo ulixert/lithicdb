@@ -256,6 +256,106 @@ func (m *Membership) probeLoop() {
 // probe runs a single SWIM probe cycle: pick a target, direct ping,
 // indirect ping on failure, suspect/dead transitions.
 func (m *Membership) probe() {
+	target := m.nextProbeTarget()
+	if target == nil {
+		return
+	}
+
+	// Direct ping.
+	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.PingTimeout)
+	defer cancel()
+
+	m.mu.RLock()
+	updates := m.getBroadcastsLocked(maxPiggyback)
+	m.mu.RUnlock()
+
+	resp, err := m.tp.Ping(ctx, target.Addr, &PingMessage{
+		SenderID:   m.selfID,
+		SenderAddr: m.cfg.Addr,
+		Updates:    updates,
+	})
+
+	if err == nil {
+		// Direct ping succeeded - merge response and ensure alive.
+		m.mu.Lock()
+		for _, u := range resp.Updates {
+			m.mergeLocked(u)
+		}
+		// If target was Suspect, refute it back to Alive.
+		if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Suspect {
+			m.setLivenessLocked(target.NodeID, Alive)
+		}
+		m.mu.Unlock()
+		return
+	}
+
+	// Direct ping failed - try indirect pings.
+	if m.indirectPing(target) {
+		// Indirect ping succeeded.
+		m.mu.Lock()
+		if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Suspect {
+			m.setLivenessLocked(target.NodeID, Alive)
+		}
+		m.mu.Unlock()
+		return
+	}
+
+	// All pings failed - suspect the target.
+	m.mu.Lock()
+	if ms, ok := m.members[target.NodeID]; ok && ms.Liveness == Alive {
+		m.setLivenessLocked(target.NodeID, Suspect)
+		m.startSuspectTimerLocked(target.NodeID)
+	}
+	m.mu.Unlock()
+}
+
+// --- State transitions ---
+
+func (m *Membership) setLivenessLocked(nodeID string, to LivenessState) {
+	ms, ok := m.members[nodeID]
+	if !ok {
+		return
+	}
+
+	from := ms.Liveness
+	if from == to {
+		return
+	}
+
+	ms.Liveness = to
+
+	// Cancel suspect timer if transitioning away from Suspect.
+	if from == Suspect {
+		if timer, ok := m.suspectTimers[nodeID]; ok {
+			timer.Stop()
+			delete(m.suspectTimers, nodeID)
+		}
+	}
+
+	m.queueBroadcastLocked(*ms)
+
+	if m.onLivenessChange != nil {
+		m.onLivenessChange(nodeID, from, to)
+	}
+}
+
+func (m *Membership) startSuspectTimerLocked(nodeID string) {
+	// Don't create duplicate timers.
+	if _, exists := m.suspectTimers[nodeID]; exists {
+		return
+	}
+
+	m.suspectTimers[nodeID] = time.AfterFunc(m.cfg.SuspectTimeout, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		ms, ok := m.members[nodeID]
+		if !ok || ms.Liveness != Suspect {
+			return // already refuted or removed
+		}
+
+		m.setLivenessLocked(nodeID, Dead)
+	})
 }
 
 // --- Gossip merge ---
