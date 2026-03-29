@@ -138,11 +138,24 @@ func (m *Membership) OnRingChange(fn func(RingDescriptor)) {
 // --- Query methods ---
 
 // IsAlive returns true if the given node is in the Alive state.
+// For routing decisions, use IsRoutable instead - it treats Suspect
+// nodes as reachable.
 func (m *Membership) IsAlive(nodeID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	ms, ok := m.members[nodeID]
 	return ok && ms.Liveness == Alive
+}
+
+// IsRoutable returns true if the node is reachable enough for the
+// coordinator to attempt RPCs. Suspect nodes are treated as routable
+// because a single dropped ping doesn't mean the node is unreachable
+// for data-plane traffic. Only Dead nodes are unroutable.
+func (m *Membership) IsRoutable(nodeID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ms, ok := m.members[nodeID]
+	return ok && ms.Liveness != Dead
 }
 
 // AliveMembers returns all members in the Alive state.
@@ -253,19 +266,37 @@ func (m *Membership) ApplyRingDescriptor(rd RingDescriptor) error {
 // --- Incoming RPC handlers ---
 
 // HandlePing processes an incoming SWIM Ping, merges piggybacked
-// gossip updates, and returns an ack with our own updates.
+// gossip updates and ring descriptor, and returns an ack with our own.
 func (m *Membership) HandlePing(msg *PingMessage) *PingMessage {
+	var ringCb func(RingDescriptor)
+	var ringDesc RingDescriptor
+
 	m.mu.Lock()
 	for _, u := range msg.Updates {
 		m.mergeLocked(u)
 	}
+
+	// Apply piggybacked ring descriptor if newer.
+	if msg.RingDesc != nil && msg.RingDesc.Version > m.ringDesc.Version {
+		m.applyRingDescLocked(*msg.RingDesc)
+		ringCb = m.onRingChange
+		ringDesc = m.ringDesc
+	}
+
 	updates := m.getBroadcastsLocked(maxPiggyback)
+	localRingDesc := m.ringDesc
 	m.mu.Unlock()
+
+	// Fire ring change callback outside the lock.
+	if ringCb != nil {
+		ringCb(ringDesc)
+	}
 
 	return &PingMessage{
 		SenderID:   m.selfID,
 		SenderAddr: m.cfg.Addr,
 		Updates:    updates,
+		RingDesc:   &localRingDesc,
 	}
 }
 
@@ -294,20 +325,39 @@ func (m *Membership) HandlePingReq(targetID, targetAddr string) bool {
 }
 
 // HandleGossipSync processes a full state exchange. Merges the
-// remote's membership table and returns our full table.
-func (m *Membership) HandleGossipSync(remote []MemberState) []MemberState {
+// remote's membership table and ring descriptor, returns our full table
+// and ring descriptor.
+func (m *Membership) HandleGossipSync(remote []MemberState, remoteRingDesc *RingDescriptor) ([]MemberState, *RingDescriptor) {
+	var ringCb func(RingDescriptor)
+	var ringDesc RingDescriptor
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	for _, u := range remote {
 		m.mergeLocked(u)
+	}
+
+	// Apply remote ring descriptor if newer.
+	if remoteRingDesc != nil && remoteRingDesc.Version > m.ringDesc.Version {
+		m.applyRingDescLocked(*remoteRingDesc)
+		ringCb = m.onRingChange
+		ringDesc = m.ringDesc
 	}
 
 	result := make([]MemberState, 0, len(m.members))
 	for _, ms := range m.members {
 		result = append(result, *ms)
 	}
-	return result
+	localRingDesc := m.ringDesc
+
+	m.mu.Unlock()
+
+	// Fire ring change callback outside the lock.
+	if ringCb != nil {
+		ringCb(ringDesc)
+	}
+
+	return result, &localRingDesc
 }
 
 // --- SWIM probe loop ---
@@ -364,7 +414,6 @@ func (m *Membership) probe() {
 		for _, u := range resp.Updates {
 			m.mergeLocked(u)
 		}
-
 		// Apply piggybacked ring descriptor if newer.
 		var ringCb func(RingDescriptor)
 		var ringDesc RingDescriptor
