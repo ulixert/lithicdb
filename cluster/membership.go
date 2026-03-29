@@ -549,6 +549,9 @@ func (m *Membership) rebuildProbeOrderLocked() {
 	m.probeOrderGen = m.memberGen
 }
 
+// randomAlivePeersLocked returns up to k random alive peers, excluding
+// self and excludeID. Uses partial Fisher-Yates: only shuffles the
+// first k positions, O(N) to build candidates + O(k) to shuffle.
 func (m *Membership) randomAlivePeersLocked(k int, excludeID string) []MemberState {
 	var candidates []MemberState
 	for id, ms := range m.members {
@@ -556,13 +559,15 @@ func (m *Membership) randomAlivePeersLocked(k int, excludeID string) []MemberSta
 			candidates = append(candidates, *ms)
 		}
 	}
-	rand.Shuffle(len(candidates), func(i, j int) {
-		candidates[i], candidates[j] = candidates[j], candidates[i]
-	})
-	if len(candidates) > k {
-		candidates = candidates[:k]
+	if len(candidates) <= k {
+		return candidates
 	}
-	return candidates
+	// Partial Fisher-Yates: swap first k positions only.
+	for i := 0; i < k; i++ {
+		j := i + rand.IntN(len(candidates)-i)
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	}
+	return candidates[:k]
 }
 
 // --- State transitions ---
