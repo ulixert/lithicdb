@@ -369,7 +369,7 @@ func (m *Membership) probe() {
 		var ringCb func(RingDescriptor)
 		var ringDesc RingDescriptor
 		if resp.RingDesc != nil && resp.RingDesc.Version > m.ringDesc.Version {
-			m.applyRingDescriptor(*resp.RingDesc)
+			m.applyRingDescLocked(*resp.RingDesc)
 			ringCb = m.onRingChange
 			ringDesc = m.ringDesc
 		}
@@ -684,18 +684,21 @@ func (m *Membership) queueBroadcastLocked(state MemberState) {
 		retransmits: m.retransmitLimit(),
 	})
 
-	// Cap buffer size to prevent unbounded growth. Keep the most recent
-	// entries (highest retransmit counts).
-	const maxBroadcasts = 128
+	// Cap buffer size to prevent unbounded growth.
+	maxBroadcasts := m.cfg.MaxBroadcasts
+	if maxBroadcasts <= 0 {
+		maxBroadcasts = 128
+	}
 	if len(m.broadcasts) > maxBroadcasts {
 		m.broadcasts = m.broadcasts[len(m.broadcasts)-maxBroadcasts:]
 	}
 }
 
 // getBroadcastsLocked returns up to limit updates for piggybacking.
-// Decrements retransmit counters and remove exhausted entries.
-// Caller must hold at least m.mu.RLock (but we mutate broadcasts,
-// so this should be called under write lock in practice).
+// Only piggybacked items have their retransmit counters decremented;
+// items that didn't fit in this batch keep their full count for the
+// next round. Exhausted entries (retransmits <= 0) are removed.
+// Caller must hold m.mu (write lock — this mutates broadcasts).
 func (m *Membership) getBroadcastsLocked(limit int) []MemberState {
 	if len(m.broadcasts) == 0 {
 		return nil
@@ -712,8 +715,8 @@ func (m *Membership) getBroadcastsLocked(limit int) []MemberState {
 	for i := range m.broadcasts {
 		if len(result) < limit {
 			result = append(result, m.broadcasts[i].state)
+			m.broadcasts[i].retransmits--
 		}
-		m.broadcasts[i].retransmits--
 		if m.broadcasts[i].retransmits > 0 {
 			alive = append(alive, m.broadcasts[i])
 		}

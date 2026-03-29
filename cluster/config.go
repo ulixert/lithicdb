@@ -15,7 +15,7 @@ type ClusterConfig struct {
 	Addr string
 
 	// SeedPeers are addresses of initial peers to contact for discovery.
-	// The node will GossipSync with each seed at startup to learn
+	// The node will GossipSync with each seed on the startup to learn
 	// about the rest of the cluster. Only 1-2 seeds are needed - gossip
 	// discovers the rest.
 	SeedPeers []string
@@ -44,6 +44,10 @@ type ClusterConfig struct {
 	// size. Higher values improve convergence speed at the cost of
 	// bandwidth. Default: 4.
 	RetransmitMult int
+
+	// MaxBroadcasts caps the gossip retransmit buffer size. When the
+	// buffer exceeds this limit, oldest entries are dropped. Default: 128.
+	MaxBroadcasts int
 }
 
 // DefaultClusterConfig returns a ClusterConfig with sane defaults.
@@ -56,5 +60,6 @@ func DefaultClusterConfig(nodeID, addr string) ClusterConfig {
 		SuspectTimeout: 5 * time.Second,
 		IndirectPeers:  3,
 		RetransmitMult: 4,
+		MaxBroadcasts:  128,
 	}
 }
