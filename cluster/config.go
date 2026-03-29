@@ -48,18 +48,25 @@ type ClusterConfig struct {
 	// MaxBroadcasts caps the gossip retransmit buffer size. When the
 	// buffer exceeds this limit, oldest entries are dropped. Default: 128.
 	MaxBroadcasts int
+
+	// DeadNodeReapTimeout is how long a Dead+RingNone node stays in the
+	// members map before being reaped. A Dead node that is still in the
+	// ring (RingJoining/RingActive) is never reaped — it stays for
+	// hinted handoff and admin remove tracking. Default: 24h.
+	DeadNodeReapTimeout time.Duration
 }
 
 // DefaultClusterConfig returns a ClusterConfig with sane defaults.
 func DefaultClusterConfig(nodeID, addr string) ClusterConfig {
 	return ClusterConfig{
-		NodeID:         nodeID,
-		Addr:           addr,
-		GossipInterval: 1 * time.Second,
-		PingTimeout:    500 * time.Millisecond,
-		SuspectTimeout: 5 * time.Second,
-		IndirectPeers:  3,
-		RetransmitMult: 4,
-		MaxBroadcasts:  128,
+		NodeID:              nodeID,
+		Addr:                addr,
+		GossipInterval:      1 * time.Second,
+		PingTimeout:         500 * time.Millisecond,
+		SuspectTimeout:      5 * time.Second,
+		IndirectPeers:       3,
+		RetransmitMult:      4,
+		MaxBroadcasts:       128,
+		DeadNodeReapTimeout: 24 * time.Hour,
 	}
 }

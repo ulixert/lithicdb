@@ -59,6 +59,9 @@ type Membership struct {
 	// without the ABA problem of counting members.
 	memberGen uint64
 
+	// Dead node reaping - tracks when nodes entered Dead state.
+	deadSince map[string]time.Time
+
 	// Ring descriptor - versioned, only mutated by admin commands.
 	// Disseminated via gossip piggybacking on ping/ack and GossipSync.
 	ringDesc RingDescriptor
@@ -82,6 +85,7 @@ func NewMembership(cfg ClusterConfig, transport Transport) *Membership {
 		members:       make(map[string]*MemberState),
 		selfID:        cfg.NodeID,
 		suspectTimers: make(map[string]*time.Timer),
+		deadSince:     make(map[string]time.Time),
 		stopCh:        make(chan struct{}),
 	}
 
@@ -366,6 +370,9 @@ func (m *Membership) probeLoop() {
 // probe runs a single SWIM probe cycle: pick a target, direct ping,
 // indirect ping on failure, suspect/dead transitions.
 func (m *Membership) probe() {
+	// Reap dead+RingNone nodes that have exceeded the reap timeout.
+	m.reapDeadNodes()
+
 	target := m.nextProbeTarget()
 	if target == nil {
 		return
@@ -582,6 +589,13 @@ func (m *Membership) setLivenessLocked(nodeID string, to LivenessState) *livenes
 	ms.Liveness = to
 	m.memberGen++
 
+	// Track when nodes enter Dead state for reaping.
+	if to == Dead {
+		m.deadSince[nodeID] = time.Now()
+	} else {
+		delete(m.deadSince, nodeID)
+	}
+
 	// Cancel suspect timer if transitioning away from Suspect.
 	if from == Suspect {
 		if timer, ok := m.suspectTimers[nodeID]; ok {
@@ -620,6 +634,39 @@ func (m *Membership) startSuspectTimerLocked(nodeID string) {
 			cb(event.nodeID, event.from, event.to)
 		}
 	})
+}
+
+// reapDeadNodes removes Dead+RingNone nodes that have exceeded the
+// reap timeout. Nodes that are Dead but still in the ring (RingJoining
+// or RingActive) are kept - they're needed for hinted handoff and
+// admin remove tracking.
+func (m *Membership) reapDeadNodes() {
+	reapTimeout := m.cfg.DeadNodeReapTimeout
+	if reapTimeout <= 0 {
+		return // reaping disabled
+	}
+
+	now := time.Now()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for nodeID, deadAt := range m.deadSince {
+		if now.Sub(deadAt) < reapTimeout {
+			continue
+		}
+		ms, ok := m.members[nodeID]
+		if !ok {
+			delete(m.deadSince, nodeID)
+			continue
+		}
+		// Only reap if still Dead AND not in the ring.
+		if ms.Liveness == Dead && ms.Ring == RingNone {
+			delete(m.members, nodeID)
+			delete(m.deadSince, nodeID)
+			m.memberGen++
+		}
+	}
 }
 
 // --- Ring descriptor helpers ---
