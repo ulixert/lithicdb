@@ -764,17 +764,28 @@ func (m *Membership) mergeLocked(remote MemberState) *livenessEvent {
 		return nil
 	}
 
-	// Higher incarnation always wins for liveness + addr.
+	// Higher incarnation always wins for addr + incarnation.
 	// Ring state is preserved - only the RingDescriptor can change it.
+	// Liveness changes are routed through setLivenessLocked for proper
+	// side effects (deadSince, suspect timer, callback).
 	if remote.Incarnation > local.Incarnation {
-		oldLiveness := local.Liveness
 		localRing := local.Ring
+		newLiveness := remote.Liveness
+		oldLiveness := local.Liveness
+
+		// Apply non-liveness fields (addr, incarnation).
 		*local = remote
 		local.Ring = localRing
-		if local.Liveness != oldLiveness {
-			return m.applyLivenessChange(remote.NodeID, oldLiveness, local.Liveness)
-		}
+		local.Liveness = oldLiveness
 		m.memberGen++
+
+		if newLiveness != oldLiveness {
+			// setLivenessLocked handles: liveness mutation, deadSince,
+			// suspect timer, memberGen, queueBroadcast.
+			return m.setLivenessLocked(remote.NodeID, newLiveness)
+		}
+		// No liveness change - still broadcast the updated incarnation/addr.
+		m.queueBroadcastLocked(*local)
 		return nil
 	}
 
@@ -784,32 +795,6 @@ func (m *Membership) mergeLocked(remote MemberState) *livenessEvent {
 	}
 
 	return nil
-}
-
-// applyLivenessChange handles the side effects of a liveness transition
-// that was applied by field copy (not via setLivenessLocked). This is
-// needed when mergeLocked does `*local = remote` for a higher incarnation,
-// which overwrites liveness as part of the full struct copy.
-func (m *Membership) applyLivenessChange(nodeID string, from, to LivenessState) *livenessEvent {
-	m.memberGen++
-
-	if to == Dead {
-		m.deadSince[nodeID] = time.Now()
-	} else {
-		delete(m.deadSince, nodeID)
-	}
-
-	if from == Suspect {
-		if timer, ok := m.suspectTimers[nodeID]; ok {
-			timer.Stop()
-			delete(m.suspectTimers, nodeID)
-		}
-	}
-
-	ms := m.members[nodeID]
-	m.queueBroadcastLocked(*ms)
-
-	return &livenessEvent{nodeID: nodeID, from: from, to: to}
 }
 
 // ringStateFromDescriptor looks up the ring state for a node from the
