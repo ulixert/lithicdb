@@ -13,6 +13,7 @@ Every core component — skip list, WAL, SSTable format, bloom filter, merge ite
 3. [Sequence Numbers, the Merge Iterator, and Wiring It All Together](https://ulixert.github.io/posts/lithicdb-wiring-it-together/)
 4. [Making the Engine Self-Maintaining: Compaction, Caching, and Durability](https://ulixert.github.io/posts/lithicdb-self-maintaining/)
 5. [Snapshots, Transactions, and the Art of Not Blocking Writers](https://ulixert.github.io/posts/lithicdb-mvcc-transactions/)
+6. [Who's Alive? Building SWIM Failure Detection from Scratch](https://ulixert.github.io/posts/lithicdb-swim-protocol/)
 
 ## Getting Started
 
