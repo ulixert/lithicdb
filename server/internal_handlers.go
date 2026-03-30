@@ -2,16 +2,25 @@ package server
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 
 	"github.com/ulixert/lithicdb/cluster"
+	"github.com/ulixert/lithicdb/db"
+	"github.com/ulixert/lithicdb/hlc"
 	pb "github.com/ulixert/lithicdb/proto/lithicpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // internalServer implements the InternalService gRPC service,
-// delegating SWIM protocol handling to the Membership.
+// delegating SWIM protocol handling to the Membership and
+// data-plane replication to the local db.DB via HLC-stamped envelopes.
 type internalServer struct {
 	pb.UnimplementedInternalServiceServer
 	membership *cluster.Membership
+	clock      *hlc.Clock // nil in standalone mode
+	db         *db.DB     // nil in standalone mode
 }
 
 func (s *internalServer) Ping(_ context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
@@ -44,6 +53,129 @@ func (s *internalServer) GossipSync(_ context.Context, req *pb.GossipSyncRequest
 	return &pb.GossipSyncResponse{
 		Members:        memberStatesToProto(local),
 		RingDescriptor: ringDescToProto(localRD),
+	}, nil
+}
+
+// --- Data-plane replication handlers ---
+
+// ReplicateWrite stores a single key-value pair wrapped in an HLC envelope.
+// The coordinator calls this on each replica after stamping the write with
+// clock.Now(). The receiver calls clock.Update() to synchronize its HLC.
+//
+// Clock drift handling: if the received timestamp is too far from the local
+// physical clock, the write is rejected. The coordinator won't count this
+// replica's ack. Anti-entropy will repair the divergence later.
+func (s *internalServer) ReplicateWrite(_ context.Context, req *pb.ReplicateWriteRequest) (*pb.ReplicateWriteResponse, error) {
+	if s.clock == nil || s.db == nil {
+		return nil, status.Error(codes.Unavailable, "replication not configured")
+	}
+	if len(req.Key) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "key must not be empty")
+	}
+	if req.Timestamp == nil {
+		return nil, status.Error(codes.InvalidArgument, "timestamp is required")
+	}
+
+	ts := protoToHLCTimestamp(req.Timestamp)
+
+	if err := s.clock.Update(ts); err != nil {
+		if errors.Is(err, hlc.ErrClockDrift) {
+			slog.Warn("clock drift on replicated write",
+				"remote_wall", ts.WallTime,
+				"remote_node", ts.NodeID,
+			)
+		}
+		return nil, status.Errorf(codes.Internal, "clock update: %v", err)
+	}
+
+	encoded, err := cluster.EncodeEnvelope(cluster.Envelope{
+		Timestamp: ts,
+		Deleted:   req.Deleted,
+		Value:     req.Value,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "encode envelope: %v", err)
+	}
+
+	if err := s.db.Put(req.Key, encoded); err != nil {
+		return nil, status.Errorf(codes.Internal, "db put: %v", err)
+	}
+
+	return &pb.ReplicateWriteResponse{}, nil
+}
+
+// ReplicateWriteBatch atomically stores multiple key-value pairs as envelopes.
+func (s *internalServer) ReplicateWriteBatch(_ context.Context, req *pb.ReplicateWriteBatchRequest) (*pb.ReplicateWriteBatchResponse, error) {
+	if s.clock == nil || s.db == nil {
+		return nil, status.Error(codes.Unavailable, "replication not configured")
+	}
+
+	batch := s.db.NewWriteBatch()
+	for i, entry := range req.Entries {
+		if len(entry.Key) == 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "entry %d: key must not be empty", i)
+		}
+		if entry.Timestamp == nil {
+			return nil, status.Errorf(codes.InvalidArgument, "entry %d: timestamp is required", i)
+		}
+
+		ts := protoToHLCTimestamp(entry.Timestamp)
+
+		if err := s.clock.Update(ts); err != nil {
+			if errors.Is(err, hlc.ErrClockDrift) {
+				slog.Warn("clock drift on replicated batch write",
+					"entry", i,
+					"remote_wall", ts.WallTime,
+					"remote_node", ts.NodeID,
+				)
+			}
+			return nil, status.Errorf(codes.Internal, "entry %d: clock update: %v", i, err)
+		}
+
+		encoded, err := cluster.EncodeEnvelope(cluster.Envelope{
+			Timestamp: ts,
+			Deleted:   entry.Deleted,
+			Value:     entry.Value,
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "entry %d: encode envelope: %v", i, err)
+		}
+
+		batch.Put(entry.Key, encoded)
+	}
+
+	if err := batch.Commit(); err != nil {
+		return nil, status.Errorf(codes.Internal, "batch commit: %v", err)
+	}
+
+	return &pb.ReplicateWriteBatchResponse{}, nil
+}
+
+// ReplicateRead returns the envelope metadata for a single key. Used by
+// the coordinator for quorum reads and read repair.
+func (s *internalServer) ReplicateRead(_ context.Context, req *pb.ReplicateReadRequest) (*pb.ReplicateReadResponse, error) {
+	if s.clock == nil || s.db == nil {
+		return nil, status.Error(codes.Unavailable, "replication not configured")
+	}
+	if len(req.Key) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "key must not be empty")
+	}
+
+	val, found := s.db.Get(req.Key)
+	if !found || val.Tombstone {
+		return &pb.ReplicateReadResponse{Found: false}, nil
+	}
+
+	env, err := cluster.DecodeEnvelope(val.Data)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "decode envelope: %v", err)
+	}
+
+	return &pb.ReplicateReadResponse{
+		Value:     env.Value,
+		Timestamp: hlcTimestampToProto(env.Timestamp),
+		Found:     true,
+		Deleted:   env.Deleted,
 	}, nil
 }
 
@@ -116,5 +248,21 @@ func protoToRingDesc(p *pb.RingDescriptorProto) *cluster.RingDescriptor {
 	return &cluster.RingDescriptor{
 		Version: p.Version,
 		Members: members,
+	}
+}
+
+func hlcTimestampToProto(ts hlc.Timestamp) *pb.HLCTimestamp {
+	return &pb.HLCTimestamp{
+		WallTime: ts.WallTime,
+		Logical:  ts.Logical,
+		NodeId:   ts.NodeID,
+	}
+}
+
+func protoToHLCTimestamp(p *pb.HLCTimestamp) hlc.Timestamp {
+	return hlc.Timestamp{
+		WallTime: p.WallTime,
+		Logical:  p.Logical,
+		NodeID:   p.NodeId,
 	}
 }
