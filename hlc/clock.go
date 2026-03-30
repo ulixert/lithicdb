@@ -94,15 +94,15 @@ func (c *Clock) Update(received Timestamp) error {
 
 	pt := c.now()
 
-	// Drift check: reject if the received timestamp is too far from physical time.
-	if c.maxDrift > 0 {
-		diff := pt - received.WallTime
-		if diff < 0 {
-			diff = -diff
-		}
-		if diff > c.maxDrift {
-			return ErrClockDrift
-		}
+	// Drift check: reject if the received timestamp is too far AHEAD of
+	// local physical time. A future timestamp is dangerous because it
+	// permanently pushes the HLC forward (HLC never goes backward).
+	// Timestamps in the past are safe — max(physical, last, received)
+	// just ignores them. Allowing old timestamps is essential for
+	// anti-entropy and partition recovery, where replicated data
+	// legitimately carries old HLC timestamps.
+	if c.maxDrift > 0 && received.WallTime-pt > c.maxDrift {
+		return ErrClockDrift
 	}
 
 	// Determine a new wall time: max of all three.
