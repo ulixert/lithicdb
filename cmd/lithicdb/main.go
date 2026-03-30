@@ -37,7 +37,7 @@ func main() {
 		log.Fatalf("listen %s: %v", *addr, err)
 	}
 
-	srv := server.New(database)
+	srv := server.New(database, nil)
 
 	// Graceful shutdown on SIGINT/SIGTERM.
 	sigCh := make(chan os.Signal, 1)
