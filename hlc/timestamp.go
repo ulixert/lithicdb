@@ -23,8 +23,15 @@ const (
 	logicalSize   = 4 // uint32 big-endian
 	nodeIDLenSize = 2 // uint16 big-endian
 
-	// timestampHeaderSize is the fixed portion of an encoded timestamp.
-	timestampHeaderSize = wallTimeSize + logicalSize + nodeIDLenSize
+	// TimestampHeaderSize is the fixed portion of an encoded timestamp:
+	// [WallTime:8][Logical:4][NodeIDLen:2]. The full encoded size is
+	// TimestampHeaderSize + len(NodeID).
+	TimestampHeaderSize = wallTimeSize + logicalSize + nodeIDLenSize
+
+	// NodeIDLenOffset is the byte offset of the NodeIDLen field within
+	// an encoded timestamp. Used by callers that need to determine the
+	// variable-length timestamp size without fully decoding it.
+	NodeIDLenOffset = wallTimeSize + logicalSize
 
 	// maxNodeIDLen is the maximum NodeID length encodable in uint16.
 	maxNodeIDLen = 1<<16 - 1
@@ -80,27 +87,27 @@ func (t Timestamp) Encode() ([]byte, error) {
 	if len(t.NodeID) > maxNodeIDLen {
 		return nil, ErrNodeIDTooLong
 	}
-	buf := make([]byte, timestampHeaderSize+len(t.NodeID))
+	buf := make([]byte, TimestampHeaderSize+len(t.NodeID))
 	binary.BigEndian.PutUint64(buf[0:], uint64(t.WallTime))
 	binary.BigEndian.PutUint32(buf[wallTimeSize:], t.Logical)
 	binary.BigEndian.PutUint16(buf[wallTimeSize+logicalSize:], uint16(len(t.NodeID)))
-	copy(buf[timestampHeaderSize:], t.NodeID)
+	copy(buf[TimestampHeaderSize:], t.NodeID)
 	return buf, nil
 }
 
 // DecodeTimestamp deserializes a timestamp from the format produced by
 // Encode. Returns an error if the data is too short or truncated.
 func DecodeTimestamp(b []byte) (Timestamp, error) {
-	if len(b) < timestampHeaderSize {
+	if len(b) < TimestampHeaderSize {
 		return Timestamp{}, fmt.Errorf("%w: need at least %d bytes, got %d",
-			ErrCorruptTimestamp, timestampHeaderSize, len(b))
+			ErrCorruptTimestamp, TimestampHeaderSize, len(b))
 	}
 
 	wallTime := int64(binary.BigEndian.Uint64(b[0:]))
 	logical := binary.BigEndian.Uint32(b[wallTimeSize:])
 	nodeIDLen := int(binary.BigEndian.Uint16(b[wallTimeSize+logicalSize:]))
 
-	expectedLen := timestampHeaderSize + nodeIDLen
+	expectedLen := TimestampHeaderSize + nodeIDLen
 	if len(b) < expectedLen {
 		return Timestamp{}, fmt.Errorf("%w: nodeID length %d exceeds data",
 			ErrCorruptTimestamp, nodeIDLen)
@@ -110,7 +117,7 @@ func DecodeTimestamp(b []byte) (Timestamp, error) {
 			ErrCorruptTimestamp, len(b)-expectedLen)
 	}
 
-	nodeID := string(b[timestampHeaderSize:expectedLen])
+	nodeID := string(b[TimestampHeaderSize:expectedLen])
 
 	return Timestamp{
 		WallTime: wallTime,

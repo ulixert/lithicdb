@@ -3,7 +3,9 @@
 // Go API, exposing Put, Get, Delete, Scan, and BatchWrite over gRPC.
 //
 // When a Membership is provided, the server also registers the
-// InternalService for SWIM protocol RPCs (Ping, PingReq, GossipSync).
+// InternalService for SWIM protocol RPCs (Ping, PingReq, GossipSync)
+// and optionally data-plane replication RPCs (ReplicateWrite,
+// ReplicateWriteBatch, ReplicateRead).
 //
 // The server does not own the db.DB lifecycle - the caller opens and
 // closes the database. This keeps the server testable and allows
@@ -15,6 +17,7 @@ import (
 
 	"github.com/ulixert/lithicdb/cluster"
 	"github.com/ulixert/lithicdb/db"
+	"github.com/ulixert/lithicdb/hlc"
 	pb "github.com/ulixert/lithicdb/proto/lithicpb"
 	"google.golang.org/grpc"
 )
@@ -34,6 +37,8 @@ type Option func(*serverConfig)
 
 type serverConfig struct {
 	membership *cluster.Membership
+	clock      *hlc.Clock
+	database   *db.DB
 }
 
 // WithMembership configures the server to register the InternalService
@@ -41,6 +46,16 @@ type serverConfig struct {
 func WithMembership(m *cluster.Membership) Option {
 	return func(c *serverConfig) {
 		c.membership = m
+	}
+}
+
+// WithReplication configures the InternalService with an HLC clock and
+// database for data-plane replication RPCs (ReplicateWrite,
+// ReplicateWriteBatch, ReplicateRead). Requires WithMembership.
+func WithReplication(clock *hlc.Clock, database *db.DB) Option {
+	return func(c *serverConfig) {
+		c.clock = clock
+		c.database = database
 	}
 }
 
@@ -60,6 +75,8 @@ func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server 
 	if cfg.membership != nil {
 		pb.RegisterInternalServiceServer(gs, &internalServer{
 			membership: cfg.membership,
+			clock:      cfg.clock,
+			db:         cfg.database,
 		})
 	}
 

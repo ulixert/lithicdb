@@ -277,9 +277,12 @@ var LithicDB_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	InternalService_Ping_FullMethodName       = "/lithicpb.InternalService/Ping"
-	InternalService_PingReq_FullMethodName    = "/lithicpb.InternalService/PingReq"
-	InternalService_GossipSync_FullMethodName = "/lithicpb.InternalService/GossipSync"
+	InternalService_Ping_FullMethodName                = "/lithicpb.InternalService/Ping"
+	InternalService_PingReq_FullMethodName             = "/lithicpb.InternalService/PingReq"
+	InternalService_GossipSync_FullMethodName          = "/lithicpb.InternalService/GossipSync"
+	InternalService_ReplicateWrite_FullMethodName      = "/lithicpb.InternalService/ReplicateWrite"
+	InternalService_ReplicateWriteBatch_FullMethodName = "/lithicpb.InternalService/ReplicateWriteBatch"
+	InternalService_ReplicateRead_FullMethodName       = "/lithicpb.InternalService/ReplicateRead"
 )
 
 // InternalServiceClient is the client API for InternalService service.
@@ -290,6 +293,10 @@ type InternalServiceClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 	PingReq(ctx context.Context, in *PingReqRequest, opts ...grpc.CallOption) (*PingReqResponse, error)
 	GossipSync(ctx context.Context, in *GossipSyncRequest, opts ...grpc.CallOption) (*GossipSyncResponse, error)
+	// Data-plane replication RPCs
+	ReplicateWrite(ctx context.Context, in *ReplicateWriteRequest, opts ...grpc.CallOption) (*ReplicateWriteResponse, error)
+	ReplicateWriteBatch(ctx context.Context, in *ReplicateWriteBatchRequest, opts ...grpc.CallOption) (*ReplicateWriteBatchResponse, error)
+	ReplicateRead(ctx context.Context, in *ReplicateReadRequest, opts ...grpc.CallOption) (*ReplicateReadResponse, error)
 }
 
 type internalServiceClient struct {
@@ -330,6 +337,36 @@ func (c *internalServiceClient) GossipSync(ctx context.Context, in *GossipSyncRe
 	return out, nil
 }
 
+func (c *internalServiceClient) ReplicateWrite(ctx context.Context, in *ReplicateWriteRequest, opts ...grpc.CallOption) (*ReplicateWriteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplicateWriteResponse)
+	err := c.cc.Invoke(ctx, InternalService_ReplicateWrite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalServiceClient) ReplicateWriteBatch(ctx context.Context, in *ReplicateWriteBatchRequest, opts ...grpc.CallOption) (*ReplicateWriteBatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplicateWriteBatchResponse)
+	err := c.cc.Invoke(ctx, InternalService_ReplicateWriteBatch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalServiceClient) ReplicateRead(ctx context.Context, in *ReplicateReadRequest, opts ...grpc.CallOption) (*ReplicateReadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplicateReadResponse)
+	err := c.cc.Invoke(ctx, InternalService_ReplicateRead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InternalServiceServer is the server API for InternalService service.
 // All implementations must embed UnimplementedInternalServiceServer
 // for forward compatibility.
@@ -338,6 +375,10 @@ type InternalServiceServer interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	PingReq(context.Context, *PingReqRequest) (*PingReqResponse, error)
 	GossipSync(context.Context, *GossipSyncRequest) (*GossipSyncResponse, error)
+	// Data-plane replication RPCs
+	ReplicateWrite(context.Context, *ReplicateWriteRequest) (*ReplicateWriteResponse, error)
+	ReplicateWriteBatch(context.Context, *ReplicateWriteBatchRequest) (*ReplicateWriteBatchResponse, error)
+	ReplicateRead(context.Context, *ReplicateReadRequest) (*ReplicateReadResponse, error)
 	mustEmbedUnimplementedInternalServiceServer()
 }
 
@@ -356,6 +397,15 @@ func (UnimplementedInternalServiceServer) PingReq(context.Context, *PingReqReque
 }
 func (UnimplementedInternalServiceServer) GossipSync(context.Context, *GossipSyncRequest) (*GossipSyncResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GossipSync not implemented")
+}
+func (UnimplementedInternalServiceServer) ReplicateWrite(context.Context, *ReplicateWriteRequest) (*ReplicateWriteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplicateWrite not implemented")
+}
+func (UnimplementedInternalServiceServer) ReplicateWriteBatch(context.Context, *ReplicateWriteBatchRequest) (*ReplicateWriteBatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplicateWriteBatch not implemented")
+}
+func (UnimplementedInternalServiceServer) ReplicateRead(context.Context, *ReplicateReadRequest) (*ReplicateReadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplicateRead not implemented")
 }
 func (UnimplementedInternalServiceServer) mustEmbedUnimplementedInternalServiceServer() {}
 func (UnimplementedInternalServiceServer) testEmbeddedByValue()                         {}
@@ -432,6 +482,60 @@ func _InternalService_GossipSync_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InternalService_ReplicateWrite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateWriteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).ReplicateWrite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_ReplicateWrite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).ReplicateWrite(ctx, req.(*ReplicateWriteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InternalService_ReplicateWriteBatch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateWriteBatchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).ReplicateWriteBatch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_ReplicateWriteBatch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).ReplicateWriteBatch(ctx, req.(*ReplicateWriteBatchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InternalService_ReplicateRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateReadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).ReplicateRead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_ReplicateRead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).ReplicateRead(ctx, req.(*ReplicateReadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InternalService_ServiceDesc is the grpc.ServiceDesc for InternalService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -450,6 +554,18 @@ var InternalService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GossipSync",
 			Handler:    _InternalService_GossipSync_Handler,
+		},
+		{
+			MethodName: "ReplicateWrite",
+			Handler:    _InternalService_ReplicateWrite_Handler,
+		},
+		{
+			MethodName: "ReplicateWriteBatch",
+			Handler:    _InternalService_ReplicateWriteBatch_Handler,
+		},
+		{
+			MethodName: "ReplicateRead",
+			Handler:    _InternalService_ReplicateRead_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
