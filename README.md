@@ -267,10 +267,10 @@ Snapshot Get is fast because `GetAt` uses the same skip list seek as regular Get
 - [x] Version-aware point lookups (`GetAt`) through memtables and SSTables
 
 ### Distributed Layer
-- [ ] Standalone gRPC server wrapping `db.DB` (Put, Get, Delete, Scan)
-- [ ] Consistent hash ring with virtual nodes (150 vnodes/node, SHA-256)
-- [ ] Hybrid logical clocks for cross-node timestamp ordering
-- [ ] SWIM gossip protocol for decentralized failure detection
+- [x] Standalone gRPC server wrapping `db.DB` (Put, Get, Delete, Scan)
+- [x] Consistent hash ring with virtual nodes (150 vnodes/node, SHA-256)
+- [x] Hybrid logical clocks for cross-node timestamp ordering
+- [x] SWIM gossip protocol for decentralized failure detection
 - [ ] Quorum coordinator with tunable R/W consistency (R + W > N)
 - [ ] Async read repair on quorum reads
 - [ ] Hinted handoff for temporary node failures
