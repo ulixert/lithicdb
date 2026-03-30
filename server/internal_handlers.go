@@ -105,12 +105,15 @@ func (s *internalServer) ReplicateWrite(_ context.Context, req *pb.ReplicateWrit
 }
 
 // ReplicateWriteBatch atomically stores multiple key-value pairs as envelopes.
+// The clock is synchronized once with the highest timestamp in the batch,
+// rather than per-entry, to avoid inflating the logical counter by N.
 func (s *internalServer) ReplicateWriteBatch(_ context.Context, req *pb.ReplicateWriteBatchRequest) (*pb.ReplicateWriteBatchResponse, error) {
 	if s.clock == nil || s.db == nil {
 		return nil, status.Error(codes.Unavailable, "replication not configured")
 	}
 
-	batch := s.db.NewWriteBatch()
+	// Validate all entries and find the max timestamp.
+	var maxTS hlc.Timestamp
 	for i, entry := range req.Entries {
 		if len(entry.Key) == 0 {
 			return nil, status.Errorf(codes.InvalidArgument, "entry %d: key must not be empty", i)
@@ -118,20 +121,27 @@ func (s *internalServer) ReplicateWriteBatch(_ context.Context, req *pb.Replicat
 		if entry.Timestamp == nil {
 			return nil, status.Errorf(codes.InvalidArgument, "entry %d: timestamp is required", i)
 		}
-
 		ts := protoToHLCTimestamp(entry.Timestamp)
-
-		if err := s.clock.Update(ts); err != nil {
-			if errors.Is(err, hlc.ErrClockDrift) {
-				slog.Warn("clock drift on replicated batch write",
-					"entry", i,
-					"remote_wall", ts.WallTime,
-					"remote_node", ts.NodeID,
-				)
-			}
-			return nil, status.Errorf(codes.Internal, "entry %d: clock update: %v", i, err)
+		if maxTS.IsZero() || maxTS.Less(ts) {
+			maxTS = ts
 		}
+	}
 
+	// Synchronize clock once with the highest timestamp in the batch.
+	if err := s.clock.Update(maxTS); err != nil {
+		if errors.Is(err, hlc.ErrClockDrift) {
+			slog.Warn("clock drift on replicated batch write",
+				"remote_wall", maxTS.WallTime,
+				"remote_node", maxTS.NodeID,
+			)
+		}
+		return nil, status.Errorf(codes.Internal, "clock update: %v", err)
+	}
+
+	// Encode and batch all entries.
+	batch := s.db.NewWriteBatch()
+	for i, entry := range req.Entries {
+		ts := protoToHLCTimestamp(entry.Timestamp)
 		encoded, err := cluster.EncodeEnvelope(cluster.Envelope{
 			Timestamp: ts,
 			Deleted:   entry.Deleted,
@@ -162,7 +172,7 @@ func (s *internalServer) ReplicateRead(_ context.Context, req *pb.ReplicateReadR
 	}
 
 	val, found := s.db.Get(req.Key)
-	if !found || val.Tombstone {
+	if !found {
 		return &pb.ReplicateReadResponse{Found: false}, nil
 	}
 
