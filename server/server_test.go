@@ -30,7 +30,7 @@ func setup(t *testing.T) (pb.LithicDBClient, func()) {
 	}
 
 	lis := bufconn.Listen(bufSize)
-	srv := server.New(database)
+	srv := server.New(database, nil)
 	go srv.Serve(lis)
 
 	conn, err := grpc.NewClient(
