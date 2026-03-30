@@ -341,6 +341,20 @@ func TestDriftProtection_Accepted(t *testing.T) {
 	}
 }
 
+func TestDriftProtection_OldTimestampAccepted(t *testing.T) {
+	c := NewClock("node-1", fixedClock(1000))
+	c.SetMaxDrift(100 * time.Nanosecond)
+
+	// Received timestamp is 500ns BEHIND local — this is fine.
+	// Old timestamps don't push the HLC forward, and must be accepted
+	// for anti-entropy and partition recovery to work.
+	remote := Timestamp{WallTime: 500, Logical: 0, NodeID: "node-2"}
+	err := c.Update(remote)
+	if err != nil {
+		t.Fatalf("Update with old timestamp should succeed: %v", err)
+	}
+}
+
 func TestDriftProtection_Disabled(t *testing.T) {
 	c := NewClock("node-1", fixedClock(1000))
 	c.SetMaxDrift(0) // disable
