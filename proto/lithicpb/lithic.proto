@@ -62,6 +62,11 @@ service InternalService {
   rpc Ping(PingRequest) returns (PingResponse);
   rpc PingReq(PingReqRequest) returns (PingReqResponse);
   rpc GossipSync(GossipSyncRequest) returns (GossipSyncResponse);
+
+  // Data-plane replication RPCs
+  rpc ReplicateWrite(ReplicateWriteRequest) returns (ReplicateWriteResponse);
+  rpc ReplicateWriteBatch(ReplicateWriteBatchRequest) returns (ReplicateWriteBatchResponse);
+  rpc ReplicateRead(ReplicateReadRequest) returns (ReplicateReadResponse);
 }
 
 // SWIM Ping - direct probe with piggybacked gossip updates and ring descriptor.
@@ -121,6 +126,43 @@ message RingMemberProto {
   string node_id    = 1;
   string addr       = 2;
   int32  ring_state = 3;  // 0=joining, 1=active
+}
+
+// ---- HLC timestamp for replication RPCs ----
+
+message HLCTimestamp {
+  int64  wall_time = 1;  // nanoseconds since epoch
+  uint32 logical   = 2;
+  string node_id   = 3;
+}
+
+// ReplicateWrite - replica receives a write from the coordinator.
+message ReplicateWriteRequest {
+  bytes        key       = 1;
+  bytes        value     = 2;
+  HLCTimestamp timestamp = 3;
+  bool         deleted   = 4;  // true = tombstone
+}
+
+message ReplicateWriteResponse {}
+
+// ReplicateWriteBatch - batch of replicated writes (atomic).
+message ReplicateWriteBatchRequest {
+  repeated ReplicateWriteRequest entries = 1;
+}
+
+message ReplicateWriteBatchResponse {}
+
+// ReplicateRead - replica returns a single key with its envelope metadata.
+message ReplicateReadRequest {
+  bytes key = 1;
+}
+
+message ReplicateReadResponse {
+  bytes        value     = 1;
+  HLCTimestamp timestamp = 2;
+  bool         found     = 3;
+  bool         deleted   = 4;
 }
 
 // ---- Operator topology management ----
