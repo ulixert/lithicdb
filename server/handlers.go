@@ -9,9 +9,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (s *Server) Put(_ context.Context, req *pb.PutRequest) (*pb.PutResponse, error) {
+func (s *Server) Put(ctx context.Context, req *pb.PutRequest) (*pb.PutResponse, error) {
 	if len(req.Key) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "key must not be empty")
+	}
+	if s.coordinator != nil {
+		if err := s.coordinator.Write(ctx, req.Key, req.Value); err != nil {
+			return nil, status.Errorf(codes.Internal, "coordinator write: %v", err)
+		}
+		return &pb.PutResponse{}, nil
 	}
 	if err := s.db.Put(req.Key, req.Value); err != nil {
 		return nil, status.Errorf(codes.Internal, "put: %v", err)
@@ -19,9 +25,19 @@ func (s *Server) Put(_ context.Context, req *pb.PutRequest) (*pb.PutResponse, er
 	return &pb.PutResponse{}, nil
 }
 
-func (s *Server) Get(_ context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
+func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
 	if len(req.Key) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "key must not be empty")
+	}
+	if s.coordinator != nil {
+		res, err := s.coordinator.Read(ctx, req.Key)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "coordinator read: %v", err)
+		}
+		if !res.Found || res.Deleted {
+			return &pb.GetResponse{Found: false}, nil
+		}
+		return &pb.GetResponse{Value: res.Value, Found: true}, nil
 	}
 	val, found := s.db.Get(req.Key)
 	if !found || val.Tombstone {
@@ -30,9 +46,15 @@ func (s *Server) Get(_ context.Context, req *pb.GetRequest) (*pb.GetResponse, er
 	return &pb.GetResponse{Value: val.Data, Found: true}, nil
 }
 
-func (s *Server) Delete(_ context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
+func (s *Server) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
 	if len(req.Key) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "key must not be empty")
+	}
+	if s.coordinator != nil {
+		if err := s.coordinator.Delete(ctx, req.Key); err != nil {
+			return nil, status.Errorf(codes.Internal, "coordinator delete: %v", err)
+		}
+		return &pb.DeleteResponse{}, nil
 	}
 	if err := s.db.Delete(req.Key); err != nil {
 		return nil, status.Errorf(codes.Internal, "delete: %v", err)
