@@ -342,6 +342,108 @@ func (c *Coordinator) remoteRead(ctx context.Context, addr string, key []byte) (
 	return client.ReplicateRead(rctx, &pb.ReplicateReadRequest{Key: key})
 }
 
+// collectAndRepair drains remaining results from ch, merges them with
+// already-collected responses, updates newest if a later response is
+// fresher, then repairs all stale replicas. Meant to run in a goroutine.
+func (c *Coordinator) collectAndRepair(
+	key []byte,
+	newest replicaReadResult,
+	alreadyCollected []replicaReadResult,
+	ch <-chan replicaReadResult,
+	remaining int,
+) {
+	all := make([]replicaReadResult, len(alreadyCollected), len(alreadyCollected)+remaining)
+	copy(all, alreadyCollected)
+
+	for i := 0; i < remaining; i++ {
+		r := <-ch
+		if r.err != nil {
+			continue
+		}
+		all = append(all, r)
+		// A late response might have a newer value - update newest.
+		if r.resp.Found {
+			rTS := protoToHLC(r.resp.Timestamp)
+			newestTS := protoToHLC(newest.resp.Timestamp)
+			if !newest.resp.Found || newestTS.Less(rTS) {
+				newest = r
+			}
+		}
+	}
+
+	c.readRepair(key, newest, all)
+}
+
+// readRepair asynchronously sends the newest value to replicas that
+// responded with stale or missing data. Fire-and-forget: failures are
+// logged but don't affect the client response.
+func (c *Coordinator) readRepair(key []byte, newest replicaReadResult, responses []replicaReadResult) {
+	newestTS := protoToHLC(newest.resp.Timestamp)
+
+	type staleNode struct {
+		nodeID string
+		addr   string
+	}
+	var stale []staleNode
+
+	for _, r := range responses {
+		if r.nodeID == newest.nodeID {
+			continue
+		}
+		if !r.resp.Found {
+			stale = append(stale, staleNode{r.nodeID, r.addr})
+			continue
+		}
+		rTS := protoToHLC(r.resp.Timestamp)
+		if rTS.Less(newestTS) {
+			stale = append(stale, staleNode{r.nodeID, r.addr})
+		}
+	}
+
+	if len(stale) == 0 {
+		return
+	}
+
+	// Fire-and-forget repairs. This method is always called from a
+	// background goroutine (collectAndRepair), so there's no caller
+	// to block. Each repair runs in its own goroutine with a timeout.
+	for _, s := range stale {
+		go func(nodeID, addr string) {
+			rctx, cancel := context.WithTimeout(context.Background(), c.cfg.PerReplicaTimeout)
+			defer cancel()
+
+			var repairErr error
+			if nodeID == c.selfID {
+				repairErr = c.localRepair(key, newest.resp)
+			} else {
+				repairErr = c.remoteWrite(rctx, addr, key,
+					newest.resp.Value, newestTS, newest.resp.Deleted)
+			}
+			if repairErr != nil {
+				c.logger.Warn("read repair failed",
+					"node", nodeID, "key_len", len(key), "err", repairErr)
+			} else {
+				c.logger.Debug("read repair sent",
+					"node", nodeID, "key_len", len(key))
+			}
+		}(s.nodeID, s.addr)
+	}
+}
+
+// localRepair writes the repair envelope to the local database.
+func (c *Coordinator) localRepair(key []byte, resp *pb.ReplicateReadResponse) error {
+	ts := protoToHLC(resp.Timestamp)
+	encoded, err := EncodeEnvelope(Envelope{
+		Timestamp: ts,
+		Deleted:   resp.Deleted,
+		Value:     resp.Value,
+	})
+	if err != nil {
+		return err
+	}
+	return c.localDB.Put(key, encoded)
+}
+
 func protoToHLC(p *pb.HLCTimestamp) hlc.Timestamp {
 	if p == nil {
 		return hlc.Timestamp{}
