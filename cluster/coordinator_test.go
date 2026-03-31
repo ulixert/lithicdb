@@ -124,25 +124,66 @@ func setupCoordinator(t *testing.T, cfg CoordinatorConfig) (*Coordinator, *mockD
 	coord := NewCoordinator(cfg, "node-1", ring, membership, clock, database, dialer, nil)
 
 	cleanup := func() {
+		// Give background goroutines (collectAndRepair, readRepair) time
+		// to finish before closing the database. Without this, background
+		// repairs race against db.Close and hit "WAL file already closed".
+		time.Sleep(50 * time.Millisecond)
 		database.Close()
 	}
 	return coord, dialer, cleanup
+}
+
+// localKey returns a key whose hash ring placement includes node-1 (the
+// coordinator's selfID). ring.GetNodes is deterministic for a given key,
+// but varies across keys. Tests that check coord.localDB after a write
+// need a key that hashes to include the local node.
+func localKey(ring *hashring.Ring) []byte {
+	for i := 0; i < 1000; i++ {
+		key := []byte(fmt.Sprintf("key-%d", i))
+		nodes := ring.GetNodes(key, 3)
+		for _, n := range nodes {
+			if n.ID == "node-1" {
+				return key
+			}
+		}
+	}
+	panic("no key hashes to node-1 in a 3-node ring — check ring setup")
 }
 
 // --- Tests ---
 
 func TestCoordinator_Write_QuorumMet(t *testing.T) {
 	cfg := DefaultCoordinatorConfig() // N=3, W=2
-	coord, _, cleanup := setupCoordinator(t, cfg)
+	coord, dialer, cleanup := setupCoordinator(t, cfg)
 	defer cleanup()
 
-	err := coord.Write(context.Background(), []byte("key1"), []byte("value1"))
+	// Track which remote replicas received the write.
+	var node2Written, node3Written atomic.Bool
+	dialer.setClient("127.0.0.1:9002", &mockClient{
+		writeFn: func(_ context.Context, req *pb.ReplicateWriteRequest) (*pb.ReplicateWriteResponse, error) {
+			node2Written.Store(true)
+			return &pb.ReplicateWriteResponse{}, nil
+		},
+	})
+	dialer.setClient("127.0.0.1:9003", &mockClient{
+		writeFn: func(_ context.Context, req *pb.ReplicateWriteRequest) (*pb.ReplicateWriteResponse, error) {
+			node3Written.Store(true)
+			return &pb.ReplicateWriteResponse{}, nil
+		},
+	})
+
+	key := localKey(coord.ring)
+	err := coord.Write(context.Background(), key, []byte("value1"))
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
-	// Verify local write happened.
-	val, found := coord.localDB.Get([]byte("key1"))
+	// Write returned with quorum (W=2). With early exit, remaining
+	// goroutines may still be in-flight. Give them time to complete.
+	time.Sleep(50 * time.Millisecond)
+
+	// All three replicas should have received the write: local + 2 remotes.
+	val, found := coord.localDB.Get(key)
 	if !found {
 		t.Fatal("key not found locally after write")
 	}
@@ -152,6 +193,9 @@ func TestCoordinator_Write_QuorumMet(t *testing.T) {
 	}
 	if string(env.Value) != "value1" {
 		t.Fatalf("got value %q, want %q", env.Value, "value1")
+	}
+	if !node2Written.Load() || !node3Written.Load() {
+		t.Fatal("expected all remotes to receive the write")
 	}
 }
 
@@ -211,13 +255,17 @@ func TestCoordinator_Delete(t *testing.T) {
 	coord, _, cleanup := setupCoordinator(t, cfg)
 	defer cleanup()
 
-	err := coord.Delete(context.Background(), []byte("key1"))
+	key := localKey(coord.ring)
+	err := coord.Delete(context.Background(), key)
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	// Verify local tombstone.
-	val, found := coord.localDB.Get([]byte("key1"))
+	// Early exit may return before the local goroutine completes.
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify local tombstone (key is guaranteed to hash to node-1).
+	val, found := coord.localDB.Get(key)
 	if !found {
 		t.Fatal("key not found locally after delete")
 	}
@@ -468,8 +516,7 @@ func TestCoordinator_Read_JoiningExcluded(t *testing.T) {
 		PerReplicaTimeout: 5 * time.Second,
 	}
 	coord, dialer, cleanup := setupCoordinator(t, cfg)
-	// Don't defer cleanup here — we wait below to let background repairs
-	// complete before closing the database.
+	defer cleanup()
 
 	// Mark node-3 as JOINING.
 	coord.membership.mu.Lock()
@@ -477,9 +524,9 @@ func TestCoordinator_Read_JoiningExcluded(t *testing.T) {
 	coord.membership.mu.Unlock()
 
 	// Write should still include JOINING node (write-only).
-	err := coord.Write(context.Background(), []byte("key1"), []byte("value1"))
+	key := localKey(coord.ring)
+	err := coord.Write(context.Background(), key, []byte("value1"))
 	if err != nil {
-		cleanup()
 		t.Fatalf("Write with JOINING node: %v", err)
 	}
 
@@ -496,11 +543,7 @@ func TestCoordinator_Read_JoiningExcluded(t *testing.T) {
 	}
 	dialer.setClient("127.0.0.1:9002", &mockClient{readFn: sameResp})
 
-	res, err := coord.Read(context.Background(), []byte("key1"))
-	// Let background goroutines complete before closing the db.
-	time.Sleep(50 * time.Millisecond)
-	cleanup()
-
+	res, err := coord.Read(context.Background(), key)
 	if err != nil {
 		t.Fatalf("Read with JOINING excluded: %v", err)
 	}
