@@ -144,14 +144,14 @@ func (c *Coordinator) writeInternal(ctx context.Context, key, value []byte, dele
 	maxFailures := len(replicas) - c.cfg.WriteQuorum + 1
 	successes := 0
 	failures := 0
-	var lastErr error
+	var errs []error
 	for successes < c.cfg.WriteQuorum && failures < maxFailures {
 		a := <-acks
 		if a.err == nil {
 			successes++
 		} else {
 			failures++
-			lastErr = a.err
+			errs = append(errs, fmt.Errorf("node %s: %w", a.nodeID, a.err))
 			c.logger.Warn("replica write failed", "node", a.nodeID, "err", a.err)
 		}
 	}
@@ -160,7 +160,7 @@ func (c *Coordinator) writeInternal(ctx context.Context, key, value []byte, dele
 		return nil
 	}
 	return fmt.Errorf("%w: got %d/%d acks: %w",
-		ErrWriteQuorumNotMet, successes, c.cfg.WriteQuorum, lastErr)
+		ErrWriteQuorumNotMet, successes, c.cfg.WriteQuorum, errors.Join(errs...))
 }
 
 // remoteWrite sends a ReplicateWrite RPC to a single replica.
