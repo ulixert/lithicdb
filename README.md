@@ -14,6 +14,7 @@ Every core component — skip list, WAL, SSTable format, bloom filter, merge ite
 4. [Making the Engine Self-Maintaining: Compaction, Caching, and Durability](https://ulixert.github.io/posts/lithicdb-self-maintaining/)
 5. [Snapshots, Transactions, and the Art of Not Blocking Writers](https://ulixert.github.io/posts/lithicdb-mvcc-transactions/)
 6. [Who's Alive? Building SWIM Failure Detection from Scratch](https://ulixert.github.io/posts/lithicdb-swim-protocol/)
+7. [Quorum Reads, Quorum Writes, and the Repair That Follows](https://ulixert.github.io/posts/lithicdb-quorum-coordinator/)
 
 ## Getting Started
 
@@ -272,8 +273,8 @@ Snapshot Get is fast because `GetAt` uses the same skip list seek as regular Get
 - [x] Consistent hash ring with virtual nodes (150 vnodes/node, SHA-256)
 - [x] Hybrid logical clocks for cross-node timestamp ordering
 - [x] SWIM gossip protocol for decentralized failure detection
-- [ ] Quorum coordinator with tunable R/W consistency (R + W > N)
-- [ ] Async read repair on quorum reads
+- [x] Quorum coordinator with tunable R/W consistency (R + W > N)
+- [x] Async read repair on quorum reads
 - [ ] Hinted handoff for temporary node failures
 - [ ] Merkle-tree anti-entropy with tombstone GC
 - [ ] Two-phase node join (JOINING → ACTIVE) with anti-entropy bootstrap
