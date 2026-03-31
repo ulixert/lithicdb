@@ -24,21 +24,25 @@ import (
 
 // Server wraps a db.DB with gRPC handlers for the LithicDB service.
 // Optionally serves InternalService for SWIM protocol if membership
-// is configured.
+// is configured. When a Coordinator is provided, client-facing RPCs
+// (Put, Get, Delete) route through the quorum coordinator instead of
+// writing directly to the local database.
 type Server struct {
 	pb.UnimplementedLithicDBServer
 
-	db *db.DB
-	gs *grpc.Server
+	db          *db.DB
+	coordinator *cluster.Coordinator
+	gs          *grpc.Server
 }
 
 // Option configures the Server.
 type Option func(*serverConfig)
 
 type serverConfig struct {
-	membership *cluster.Membership
-	clock      *hlc.Clock
-	database   *db.DB
+	membership  *cluster.Membership
+	clock       *hlc.Clock
+	database    *db.DB
+	coordinator *cluster.Coordinator
 }
 
 // WithMembership configures the server to register the InternalService
@@ -59,6 +63,15 @@ func WithReplication(clock *hlc.Clock, database *db.DB) Option {
 	}
 }
 
+// WithCoordinator enables cluster mode for client-facing RPCs. When
+// set, Put/Get/Delete are routed through the quorum coordinator
+// instead of writing directly to the local database.
+func WithCoordinator(coord *cluster.Coordinator) Option {
+	return func(c *serverConfig) {
+		c.coordinator = coord
+	}
+}
+
 // New creates a gRPC server that serves the LithicDB service backed
 // by the given database. The caller retains ownership of the database
 // and must close it after stopping the server.
@@ -69,7 +82,7 @@ func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server 
 	}
 
 	gs := grpc.NewServer(grpcOpts...)
-	s := &Server{db: database, gs: gs}
+	s := &Server{db: database, coordinator: cfg.coordinator, gs: gs}
 	pb.RegisterLithicDBServer(gs, s)
 
 	if cfg.membership != nil {
