@@ -3,7 +3,7 @@ package cluster
 import (
 	"testing"
 
-	"github.com/ulixert/lithicdb/hlc"
+	"github.com/ulixert/theseon/hlc"
 )
 
 func TestEncodeDecodeEnvelope(t *testing.T) {

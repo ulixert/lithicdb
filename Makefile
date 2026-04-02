@@ -40,7 +40,7 @@ vet:
 proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
 	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-	       proto/lithicpb/lithic.proto
+	       proto/theseonpb/theseon.proto
 
 # Remove test artifacts and generated data
 clean:

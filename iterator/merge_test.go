@@ -3,7 +3,7 @@ package iterator
 import (
 	"testing"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 // sliceIterator is a simple test iterator over a fixed list of entries

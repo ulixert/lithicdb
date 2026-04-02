@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.1
-// source: proto/lithicpb/lithic.proto
+// source: proto/theseonpb/theseon.proto
 
-package lithicpb
+package theseonpb
 
 import (
 	context "context"
@@ -19,17 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LithicDB_Put_FullMethodName        = "/lithicpb.LithicDB/Put"
-	LithicDB_Get_FullMethodName        = "/lithicpb.LithicDB/Get"
-	LithicDB_Delete_FullMethodName     = "/lithicpb.LithicDB/Delete"
-	LithicDB_Scan_FullMethodName       = "/lithicpb.LithicDB/Scan"
-	LithicDB_BatchWrite_FullMethodName = "/lithicpb.LithicDB/BatchWrite"
+	Theseon_Put_FullMethodName        = "/theseonpb.Theseon/Put"
+	Theseon_Get_FullMethodName        = "/theseonpb.Theseon/Get"
+	Theseon_Delete_FullMethodName     = "/theseonpb.Theseon/Delete"
+	Theseon_Scan_FullMethodName       = "/theseonpb.Theseon/Scan"
+	Theseon_BatchWrite_FullMethodName = "/theseonpb.Theseon/BatchWrite"
 )
 
-// LithicDBClient is the client API for LithicDB service.
+// TheseonClient is the client API for Theseon service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type LithicDBClient interface {
+type TheseonClient interface {
 	Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error)
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
@@ -37,47 +37,47 @@ type LithicDBClient interface {
 	BatchWrite(ctx context.Context, in *BatchWriteRequest, opts ...grpc.CallOption) (*BatchWriteResponse, error)
 }
 
-type lithicDBClient struct {
+type theseonClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewLithicDBClient(cc grpc.ClientConnInterface) LithicDBClient {
-	return &lithicDBClient{cc}
+func NewTheseonClient(cc grpc.ClientConnInterface) TheseonClient {
+	return &theseonClient{cc}
 }
 
-func (c *lithicDBClient) Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error) {
+func (c *theseonClient) Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PutResponse)
-	err := c.cc.Invoke(ctx, LithicDB_Put_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, Theseon_Put_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *lithicDBClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error) {
+func (c *theseonClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetResponse)
-	err := c.cc.Invoke(ctx, LithicDB_Get_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, Theseon_Get_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *lithicDBClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error) {
+func (c *theseonClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteResponse)
-	err := c.cc.Invoke(ctx, LithicDB_Delete_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, Theseon_Delete_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *lithicDBClient) Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ScanResponse], error) {
+func (c *theseonClient) Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ScanResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &LithicDB_ServiceDesc.Streams[0], LithicDB_Scan_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Theseon_ServiceDesc.Streams[0], Theseon_Scan_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,197 +92,197 @@ func (c *lithicDBClient) Scan(ctx context.Context, in *ScanRequest, opts ...grpc
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type LithicDB_ScanClient = grpc.ServerStreamingClient[ScanResponse]
+type Theseon_ScanClient = grpc.ServerStreamingClient[ScanResponse]
 
-func (c *lithicDBClient) BatchWrite(ctx context.Context, in *BatchWriteRequest, opts ...grpc.CallOption) (*BatchWriteResponse, error) {
+func (c *theseonClient) BatchWrite(ctx context.Context, in *BatchWriteRequest, opts ...grpc.CallOption) (*BatchWriteResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(BatchWriteResponse)
-	err := c.cc.Invoke(ctx, LithicDB_BatchWrite_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, Theseon_BatchWrite_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// LithicDBServer is the server API for LithicDB service.
-// All implementations must embed UnimplementedLithicDBServer
+// TheseonServer is the server API for Theseon service.
+// All implementations must embed UnimplementedTheseonServer
 // for forward compatibility.
-type LithicDBServer interface {
+type TheseonServer interface {
 	Put(context.Context, *PutRequest) (*PutResponse, error)
 	Get(context.Context, *GetRequest) (*GetResponse, error)
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	Scan(*ScanRequest, grpc.ServerStreamingServer[ScanResponse]) error
 	BatchWrite(context.Context, *BatchWriteRequest) (*BatchWriteResponse, error)
-	mustEmbedUnimplementedLithicDBServer()
+	mustEmbedUnimplementedTheseonServer()
 }
 
-// UnimplementedLithicDBServer must be embedded to have
+// UnimplementedTheseonServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedLithicDBServer struct{}
+type UnimplementedTheseonServer struct{}
 
-func (UnimplementedLithicDBServer) Put(context.Context, *PutRequest) (*PutResponse, error) {
+func (UnimplementedTheseonServer) Put(context.Context, *PutRequest) (*PutResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Put not implemented")
 }
-func (UnimplementedLithicDBServer) Get(context.Context, *GetRequest) (*GetResponse, error) {
+func (UnimplementedTheseonServer) Get(context.Context, *GetRequest) (*GetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
 }
-func (UnimplementedLithicDBServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
+func (UnimplementedTheseonServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
 }
-func (UnimplementedLithicDBServer) Scan(*ScanRequest, grpc.ServerStreamingServer[ScanResponse]) error {
+func (UnimplementedTheseonServer) Scan(*ScanRequest, grpc.ServerStreamingServer[ScanResponse]) error {
 	return status.Error(codes.Unimplemented, "method Scan not implemented")
 }
-func (UnimplementedLithicDBServer) BatchWrite(context.Context, *BatchWriteRequest) (*BatchWriteResponse, error) {
+func (UnimplementedTheseonServer) BatchWrite(context.Context, *BatchWriteRequest) (*BatchWriteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BatchWrite not implemented")
 }
-func (UnimplementedLithicDBServer) mustEmbedUnimplementedLithicDBServer() {}
-func (UnimplementedLithicDBServer) testEmbeddedByValue()                  {}
+func (UnimplementedTheseonServer) mustEmbedUnimplementedTheseonServer() {}
+func (UnimplementedTheseonServer) testEmbeddedByValue()                 {}
 
-// UnsafeLithicDBServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to LithicDBServer will
+// UnsafeTheseonServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TheseonServer will
 // result in compilation errors.
-type UnsafeLithicDBServer interface {
-	mustEmbedUnimplementedLithicDBServer()
+type UnsafeTheseonServer interface {
+	mustEmbedUnimplementedTheseonServer()
 }
 
-func RegisterLithicDBServer(s grpc.ServiceRegistrar, srv LithicDBServer) {
-	// If the following call panics, it indicates UnimplementedLithicDBServer was
+func RegisterTheseonServer(s grpc.ServiceRegistrar, srv TheseonServer) {
+	// If the following call panics, it indicates UnimplementedTheseonServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&LithicDB_ServiceDesc, srv)
+	s.RegisterService(&Theseon_ServiceDesc, srv)
 }
 
-func _LithicDB_Put_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Theseon_Put_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PutRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LithicDBServer).Put(ctx, in)
+		return srv.(TheseonServer).Put(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LithicDB_Put_FullMethodName,
+		FullMethod: Theseon_Put_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LithicDBServer).Put(ctx, req.(*PutRequest))
+		return srv.(TheseonServer).Put(ctx, req.(*PutRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LithicDB_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Theseon_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LithicDBServer).Get(ctx, in)
+		return srv.(TheseonServer).Get(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LithicDB_Get_FullMethodName,
+		FullMethod: Theseon_Get_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LithicDBServer).Get(ctx, req.(*GetRequest))
+		return srv.(TheseonServer).Get(ctx, req.(*GetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LithicDB_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Theseon_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LithicDBServer).Delete(ctx, in)
+		return srv.(TheseonServer).Delete(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LithicDB_Delete_FullMethodName,
+		FullMethod: Theseon_Delete_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LithicDBServer).Delete(ctx, req.(*DeleteRequest))
+		return srv.(TheseonServer).Delete(ctx, req.(*DeleteRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LithicDB_Scan_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _Theseon_Scan_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(ScanRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(LithicDBServer).Scan(m, &grpc.GenericServerStream[ScanRequest, ScanResponse]{ServerStream: stream})
+	return srv.(TheseonServer).Scan(m, &grpc.GenericServerStream[ScanRequest, ScanResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type LithicDB_ScanServer = grpc.ServerStreamingServer[ScanResponse]
+type Theseon_ScanServer = grpc.ServerStreamingServer[ScanResponse]
 
-func _LithicDB_BatchWrite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Theseon_BatchWrite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BatchWriteRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LithicDBServer).BatchWrite(ctx, in)
+		return srv.(TheseonServer).BatchWrite(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LithicDB_BatchWrite_FullMethodName,
+		FullMethod: Theseon_BatchWrite_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LithicDBServer).BatchWrite(ctx, req.(*BatchWriteRequest))
+		return srv.(TheseonServer).BatchWrite(ctx, req.(*BatchWriteRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// LithicDB_ServiceDesc is the grpc.ServiceDesc for LithicDB service.
+// Theseon_ServiceDesc is the grpc.ServiceDesc for Theseon service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var LithicDB_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "lithicpb.LithicDB",
-	HandlerType: (*LithicDBServer)(nil),
+var Theseon_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "theseonpb.Theseon",
+	HandlerType: (*TheseonServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "Put",
-			Handler:    _LithicDB_Put_Handler,
+			Handler:    _Theseon_Put_Handler,
 		},
 		{
 			MethodName: "Get",
-			Handler:    _LithicDB_Get_Handler,
+			Handler:    _Theseon_Get_Handler,
 		},
 		{
 			MethodName: "Delete",
-			Handler:    _LithicDB_Delete_Handler,
+			Handler:    _Theseon_Delete_Handler,
 		},
 		{
 			MethodName: "BatchWrite",
-			Handler:    _LithicDB_BatchWrite_Handler,
+			Handler:    _Theseon_BatchWrite_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Scan",
-			Handler:       _LithicDB_Scan_Handler,
+			Handler:       _Theseon_Scan_Handler,
 			ServerStreams: true,
 		},
 	},
-	Metadata: "proto/lithicpb/lithic.proto",
+	Metadata: "proto/theseonpb/theseon.proto",
 }
 
 const (
-	InternalService_Ping_FullMethodName                = "/lithicpb.InternalService/Ping"
-	InternalService_PingReq_FullMethodName             = "/lithicpb.InternalService/PingReq"
-	InternalService_GossipSync_FullMethodName          = "/lithicpb.InternalService/GossipSync"
-	InternalService_ReplicateWrite_FullMethodName      = "/lithicpb.InternalService/ReplicateWrite"
-	InternalService_ReplicateWriteBatch_FullMethodName = "/lithicpb.InternalService/ReplicateWriteBatch"
-	InternalService_ReplicateRead_FullMethodName       = "/lithicpb.InternalService/ReplicateRead"
+	InternalService_Ping_FullMethodName                = "/theseonpb.InternalService/Ping"
+	InternalService_PingReq_FullMethodName             = "/theseonpb.InternalService/PingReq"
+	InternalService_GossipSync_FullMethodName          = "/theseonpb.InternalService/GossipSync"
+	InternalService_ReplicateWrite_FullMethodName      = "/theseonpb.InternalService/ReplicateWrite"
+	InternalService_ReplicateWriteBatch_FullMethodName = "/theseonpb.InternalService/ReplicateWriteBatch"
+	InternalService_ReplicateRead_FullMethodName       = "/theseonpb.InternalService/ReplicateRead"
 )
 
 // InternalServiceClient is the client API for InternalService service.
@@ -540,7 +540,7 @@ func _InternalService_ReplicateRead_Handler(srv interface{}, ctx context.Context
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var InternalService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "lithicpb.InternalService",
+	ServiceName: "theseonpb.InternalService",
 	HandlerType: (*InternalServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -569,15 +569,15 @@ var InternalService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/lithicpb/lithic.proto",
+	Metadata: "proto/theseonpb/theseon.proto",
 }
 
 const (
-	AdminService_GetNodeInfo_FullMethodName      = "/lithicpb.AdminService/GetNodeInfo"
-	AdminService_GetClusterStatus_FullMethodName = "/lithicpb.AdminService/GetClusterStatus"
-	AdminService_JoinRing_FullMethodName         = "/lithicpb.AdminService/JoinRing"
-	AdminService_ActivateNode_FullMethodName     = "/lithicpb.AdminService/ActivateNode"
-	AdminService_RemoveNode_FullMethodName       = "/lithicpb.AdminService/RemoveNode"
+	AdminService_GetNodeInfo_FullMethodName      = "/theseonpb.AdminService/GetNodeInfo"
+	AdminService_GetClusterStatus_FullMethodName = "/theseonpb.AdminService/GetClusterStatus"
+	AdminService_JoinRing_FullMethodName         = "/theseonpb.AdminService/JoinRing"
+	AdminService_ActivateNode_FullMethodName     = "/theseonpb.AdminService/ActivateNode"
+	AdminService_RemoveNode_FullMethodName       = "/theseonpb.AdminService/RemoveNode"
 )
 
 // AdminServiceClient is the client API for AdminService service.
@@ -798,7 +798,7 @@ func _AdminService_RemoveNode_Handler(srv interface{}, ctx context.Context, dec 
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AdminService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "lithicpb.AdminService",
+	ServiceName: "theseonpb.AdminService",
 	HandlerType: (*AdminServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -823,5 +823,5 @@ var AdminService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/lithicpb/lithic.proto",
+	Metadata: "proto/theseonpb/theseon.proto",
 }

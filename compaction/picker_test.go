@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ulixert/lithicdb/kv"
-	"github.com/ulixert/lithicdb/sstable"
+	"github.com/ulixert/theseon/kv"
+	"github.com/ulixert/theseon/sstable"
 )
 
 // makeHandle creates a TableHandle with a Reader containing the given

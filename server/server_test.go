@@ -8,9 +8,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ulixert/lithicdb/db"
-	pb "github.com/ulixert/lithicdb/proto/lithicpb"
-	"github.com/ulixert/lithicdb/server"
+	"github.com/ulixert/theseon/db"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
+	"github.com/ulixert/theseon/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -20,7 +20,7 @@ import (
 
 const bufSize = 1024 * 1024
 
-func setup(t *testing.T) (pb.LithicDBClient, func()) {
+func setup(t *testing.T) (pb.TheseonClient, func()) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -44,7 +44,7 @@ func setup(t *testing.T) (pb.LithicDBClient, func()) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	client := pb.NewLithicDBClient(conn)
+	client := pb.NewTheseonClient(conn)
 	cleanup := func() {
 		conn.Close()
 		srv.GracefulStop()

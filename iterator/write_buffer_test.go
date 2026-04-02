@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 func sortedEntries(entries []WriteBufferEntry) []WriteBufferEntry {

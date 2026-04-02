@@ -3,8 +3,8 @@ package db
 import (
 	"sync/atomic"
 
-	"github.com/ulixert/lithicdb/iterator"
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/iterator"
+	"github.com/ulixert/theseon/kv"
 )
 
 // Snapshot provides a consistent, point-in-time read view of the

@@ -3,8 +3,8 @@ package db
 import (
 	"fmt"
 
-	"github.com/ulixert/lithicdb/kv"
-	"github.com/ulixert/lithicdb/memtable"
+	"github.com/ulixert/theseon/kv"
+	"github.com/ulixert/theseon/memtable"
 )
 
 // Put inserts or updates a key-value pair.

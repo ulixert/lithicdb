@@ -5,12 +5,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 func openTestDB(t *testing.T) *DB {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "lithic-tx-*")
+	dir, err := os.MkdirTemp("", "theseon-tx-*")
 	if err != nil {
 		t.Fatal(err)
 	}

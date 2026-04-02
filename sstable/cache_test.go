@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 func TestBlockCache_PutAndGet(t *testing.T) {

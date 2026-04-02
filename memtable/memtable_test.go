@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/ulixert/lithicdb/iterator/itertest"
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/iterator/itertest"
+	"github.com/ulixert/theseon/kv"
 )
 
 // Helper: put a user key with a given seq number

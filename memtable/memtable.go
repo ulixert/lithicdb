@@ -3,8 +3,8 @@ package memtable
 import (
 	"sync"
 
-	"github.com/ulixert/lithicdb/iterator"
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/iterator"
+	"github.com/ulixert/theseon/kv"
 )
 
 // Memtable is a thread-safe, ordered, in-memory key-value store backed

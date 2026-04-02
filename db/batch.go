@@ -3,8 +3,8 @@ package db
 import (
 	"fmt"
 
-	"github.com/ulixert/lithicdb/kv"
-	"github.com/ulixert/lithicdb/wal"
+	"github.com/ulixert/theseon/kv"
+	"github.com/ulixert/theseon/wal"
 )
 
 // WriteBatch groups multiple Put and Delete operations into a single

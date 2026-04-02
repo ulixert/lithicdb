@@ -1,4 +1,4 @@
-# LithicDB
+# Theseon
 
 A distributed LSM-tree key-value storage engine built from scratch in Go.
 
@@ -8,20 +8,20 @@ Every core component — skip list, WAL, SSTable format, bloom filter, merge ite
 
 ## Blog Posts
 
-1. [Building LithicDB: A Distributed LSM Storage Engine from Scratch in Go](https://ulixert.github.io/posts/building-lithicdb/)
-2. [The Storage Foundation: Memtable, WAL, and SSTables](https://ulixert.github.io/posts/lithicdb-storage-foundation/)
-3. [Sequence Numbers, the Merge Iterator, and Wiring It All Together](https://ulixert.github.io/posts/lithicdb-wiring-it-together/)
-4. [Making the Engine Self-Maintaining: Compaction, Caching, and Durability](https://ulixert.github.io/posts/lithicdb-self-maintaining/)
-5. [Snapshots, Transactions, and the Art of Not Blocking Writers](https://ulixert.github.io/posts/lithicdb-mvcc-transactions/)
-6. [Who's Alive? Building SWIM Failure Detection from Scratch](https://ulixert.github.io/posts/lithicdb-swim-protocol/)
-7. [Quorum Reads, Quorum Writes, and the Repair That Follows](https://ulixert.github.io/posts/lithicdb-quorum-coordinator/)
+1. [Building Theseon: A Distributed LSM Storage Engine from Scratch in Go](https://ulixert.github.io/posts/building-theseon/)
+2. [The Storage Foundation: Memtable, WAL, and SSTables](https://ulixert.github.io/posts/theseon-storage-foundation/)
+3. [Sequence Numbers, the Merge Iterator, and Wiring It All Together](https://ulixert.github.io/posts/theseon-wiring-it-together/)
+4. [Making the Engine Self-Maintaining: Compaction, Caching, and Durability](https://ulixert.github.io/posts/theseon-self-maintaining/)
+5. [Snapshots, Transactions, and the Art of Not Blocking Writers](https://ulixert.github.io/posts/theseon-mvcc-transactions/)
+6. [Who's Alive? Building SWIM Failure Detection from Scratch](https://ulixert.github.io/posts/theseon-swim-protocol/)
+7. [Quorum Reads, Quorum Writes, and the Repair That Follows](https://ulixert.github.io/posts/theseon-quorum-coordinator/)
 
 ## Getting Started
 
 ```go
 package main
 
-import "github.com/ulixert/lithicdb/db"
+import "github.com/ulixert/theseon/db"
 
 func main() {
     d, err := db.Open(db.DefaultOptions("./data"))
@@ -81,7 +81,7 @@ func main() {
           HLC clocks  ◄┼─────────┼──────────┼► cross-node ordering
                        │         │          │
              ┌─────────▼─────────▼──────────▼────────────┐
-             │          LithicDB Engine (per node)       │
+             │          Theseon Engine (per node)       │
              │                                           │
              │  ┌──────────────────────────────────────┐ │
              │  │  Transaction Manager                 │ │
@@ -163,13 +163,13 @@ Get("user:1234")
 
 ### Internal Key Format
 
-Every key stored in LithicDB is an *internal key*: the user's key bytes followed by an 8-byte *inverted* sequence number (`math.MaxUint64 - seq`, big-endian). Inverting the sequence number means `bytes.Compare` on internal keys gives the right ordering for free: ascending by user key, then descending by sequence number (newest version first). This avoids a custom comparator — the entire read path (skip list, SSTable binary search, merge iterator) uses plain `bytes.Compare`, and MVCC comes from the key encoding, not from extra logic.
+Every key stored in Theseon is an *internal key*: the user's key bytes followed by an 8-byte *inverted* sequence number (`math.MaxUint64 - seq`, big-endian). Inverting the sequence number means `bytes.Compare` on internal keys gives the right ordering for free: ascending by user key, then descending by sequence number (newest version first). This avoids a custom comparator — the entire read path (skip list, SSTable binary search, merge iterator) uses plain `bytes.Compare`, and MVCC comes from the key encoding, not from extra logic.
 
 The sequence number is assigned at write time and never changes. This means MVCC and snapshot isolation were a logic change on top of the existing format, not a format migration. `GetAt(key, maxSeq)` simply seeks to the user key and scans forward until it finds a version with `seq ≤ maxSeq`.
 
 ### Leveled Compaction
 
-LithicDB uses leveled compaction with a 10x size ratio (L1=256MB, L2=2.5GB, L3=25GB, up to 7 levels). Leveled was chosen over tiered (size-tiered) for two reasons:
+Theseon uses leveled compaction with a 10x size ratio (L1=256MB, L2=2.5GB, L3=25GB, up to 7 levels). Leveled was chosen over tiered (size-tiered) for two reasons:
 
 1. **Bounded space amplification.** Leveled compaction guarantees at most ~10% space overhead beyond the logical data size, because each level has non-overlapping key ranges and at most one live version per key (modulo active snapshots). Tiered compaction can temporarily hold multiple copies of the same key across same-level runs, leading to higher space amplification.
 
@@ -202,11 +202,11 @@ Each SSTable is a self-contained file with four regions:
 
 **Index block** maps each data block's last key to its file offset, enabling binary search to find the right block in O(log n).
 
-**Footer** (33 bytes, fixed) stores offsets to the bloom filter and index block, a format version byte, a CRC32 of the footer fields, and a magic number (`0x4C544442` — "LTDB").
+**Footer** (33 bytes, fixed) stores offsets to the bloom filter and index block, a format version byte, a CRC32 of the footer fields, and a magic number (`0x5448534E` — "THSN").
 
 ### Distributed Consistency Model
 
-LithicDB's distributed layer provides **eventual consistency with tunable quorum** (Dynamo-style). The key design choices:
+Theseon's distributed layer provides **eventual consistency with tunable quorum** (Dynamo-style). The key design choices:
 
 **Leaderless replication.** Any node can coordinate any request. No leader election, no single point of failure. The coordinator fans out to N replicas, waits for W acks (writes) or R responses (reads). With R + W > N, reads observe the most recent quorum-acknowledged write.
 
@@ -284,7 +284,7 @@ Snapshot Get is fast because `GetAt` uses the same skip list seek as regular Get
 ## Project Structure
 
 ```
-lithicdb/
+theseon/
   db/              engine: Put, Get, Delete, Scan, flush, recovery, compaction,
                    snapshots, transactions, MVCC-aware version GC
   compaction/      picker (L0 trigger + level size ratio), executor, level state
@@ -320,7 +320,7 @@ make test-v       # verbose test output
 - [The Apache Cassandra Architecture](https://cassandra.apache.org/doc/latest/cassandra/architecture/) — Dynamo-inspired distributed architecture, gossip protocol, consistent hashing, hinted handoff, anti-entropy repair
 - [Scylla's Compaction Strategies](https://opensource.docs.scylladb.com/stable/architecture/compaction/compaction-strategies.html) — Practical comparison of size-tiered vs leveled vs incremental compaction in production
 - [RocksDB Tuning Guide](https://github.com/facebook/rocksdb/wiki/RocksDB-Tuning-Guide) — Production LSM tuning: block cache sizing, bloom filter configuration, compaction triggers
-- [LevelDB](https://github.com/google/leveldb) — Google's original LSM key-value store; LithicDB's bloom filter uses LevelDB's rotated-hash probe design (C++)
+- [LevelDB](https://github.com/google/leveldb) — Google's original LSM key-value store; Theseon's bloom filter uses LevelDB's rotated-hash probe design (C++)
 - [Pebble](https://github.com/cockroachdb/pebble) — CockroachDB's LSM storage engine; internal key encoding inspiration (Go)
 - [Badger](https://github.com/dgraph-io/badger) — Dgraph's key-value store with WiscKey-style separation (Go)
 - [mini-lsm](https://github.com/skyzh/mini-lsm) — LSM-tree course with week-by-week implementation (Rust)

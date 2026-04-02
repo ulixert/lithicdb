@@ -5,7 +5,7 @@ import (
 	"errors"
 	"hash/crc32"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 // WAL record format:

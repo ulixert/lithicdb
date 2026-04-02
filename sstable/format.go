@@ -28,7 +28,7 @@ import (
 //	[index_len:     4]
 //	[version:       1]
 //	[checksum:      4]  CRC32 of the 25 bytes above
-//	[magic:         4]  0x4C544442 ("LTDB")
+//	[magic:         4]  0x5448534E ("THSN")
 //
 // Index block layout:
 //
@@ -44,7 +44,7 @@ const (
 	blockChecksumSize = 4
 
 	footerSize = 33
-	magicValue = uint32(0x4C544442) // "LTDB"
+	magicValue = uint32(0x5448534E) // "THSN"
 	version1   = byte(1)
 
 	indexKeyLenSize    = 2

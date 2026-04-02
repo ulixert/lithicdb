@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 // ikey builds an internal key for testing.

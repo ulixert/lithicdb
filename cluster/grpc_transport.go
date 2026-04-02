@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	pb "github.com/ulixert/lithicdb/proto/lithicpb"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

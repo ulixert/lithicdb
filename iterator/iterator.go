@@ -1,7 +1,7 @@
 package iterator
 
 // Iterator is the fundamental abstraction for reading ordered key-value data
-// in LithicDB. Every readable component — memtables, SSTable blocks, merge
+// in Theseon. Every readable component — memtables, SSTable blocks, merge
 // iterators, MVCC filtered iterators — implements this interface.
 //
 // Usage pattern:

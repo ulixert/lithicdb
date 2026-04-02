@@ -15,20 +15,20 @@ package server
 import (
 	"net"
 
-	"github.com/ulixert/lithicdb/cluster"
-	"github.com/ulixert/lithicdb/db"
-	"github.com/ulixert/lithicdb/hlc"
-	pb "github.com/ulixert/lithicdb/proto/lithicpb"
+	"github.com/ulixert/theseon/cluster"
+	"github.com/ulixert/theseon/db"
+	"github.com/ulixert/theseon/hlc"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"google.golang.org/grpc"
 )
 
-// Server wraps a db.DB with gRPC handlers for the LithicDB service.
+// Server wraps a db.DB with gRPC handlers for the Theseon service.
 // Optionally serves InternalService for SWIM protocol if membership
 // is configured. When a Coordinator is provided, client-facing RPCs
 // (Put, Get, Delete) route through the quorum coordinator instead of
 // writing directly to the local database.
 type Server struct {
-	pb.UnimplementedLithicDBServer
+	pb.UnimplementedTheseonServer
 
 	db          *db.DB
 	coordinator *cluster.Coordinator
@@ -72,7 +72,7 @@ func WithCoordinator(coord *cluster.Coordinator) Option {
 	}
 }
 
-// New creates a gRPC server that serves the LithicDB service backed
+// New creates a gRPC server that serves the Theseon service backed
 // by the given database. The caller retains ownership of the database
 // and must close it after stopping the server.
 func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server {
@@ -83,7 +83,7 @@ func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server 
 
 	gs := grpc.NewServer(grpcOpts...)
 	s := &Server{db: database, coordinator: cfg.coordinator, gs: gs}
-	pb.RegisterLithicDBServer(gs, s)
+	pb.RegisterTheseonServer(gs, s)
 
 	if cfg.membership != nil {
 		pb.RegisterInternalServiceServer(gs, &internalServer{
