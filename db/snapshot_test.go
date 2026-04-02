@@ -5,11 +5,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 func TestSnapshot_ReadAtPointInTime(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestSnapshot_ReadAtPointInTime(t *testing.T) {
 }
 
 func TestSnapshot_DoesNotSeeWritesAfterCreation(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestSnapshot_DoesNotSeeWritesAfterCreation(t *testing.T) {
 }
 
 func TestSnapshot_SeesDeletesBeforeSnapshot(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestSnapshot_SeesDeletesBeforeSnapshot(t *testing.T) {
 }
 
 func TestSnapshot_DoesNotSeeDeletesAfterSnapshot(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestSnapshot_DoesNotSeeDeletesAfterSnapshot(t *testing.T) {
 }
 
 func TestSnapshot_Scan(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestSnapshot_Scan(t *testing.T) {
 }
 
 func TestSnapshot_ScanRange(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestSnapshot_ScanRange(t *testing.T) {
 }
 
 func TestSnapshot_SurvivesFlush(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestSnapshot_SurvivesFlush(t *testing.T) {
 }
 
 func TestSnapshot_DoubleClose(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestSnapshot_DoubleClose(t *testing.T) {
 }
 
 func TestSnapshot_MultipleSnapshots(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestSnapshot_MultipleSnapshots(t *testing.T) {
 }
 
 func TestSnapshot_ScanDeduplication(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestSnapshot_ScanDeduplication(t *testing.T) {
 }
 
 func TestSnapshot_RegistryTracking(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-snap-*")
+	dir, err := os.MkdirTemp("", "theseon-snap-*")
 	if err != nil {
 		t.Fatal(err)
 	}

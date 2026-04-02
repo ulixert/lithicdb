@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/ulixert/lithicdb/compaction"
+	"github.com/ulixert/theseon/compaction"
 )
 
 // --- Memtable-only benchmarks (no flush, all data in memory) ---

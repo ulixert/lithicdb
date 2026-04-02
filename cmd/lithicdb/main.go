@@ -1,10 +1,10 @@
-// Command lithicdb starts a standalone gRPC server backed by a LithicDB
+// Command theseon starts a standalone gRPC server backed by a Theseon
 // storage engine. Graceful shutdown on SIGINT/SIGTERM drains in-flight
 // RPCs before closing the database.
 //
 // Usage:
 //
-//	lithicdb -addr=:50051 -data-dir=./data
+//	theseon -addr=:50051 -data-dir=./data
 package main
 
 import (
@@ -15,8 +15,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ulixert/lithicdb/db"
-	"github.com/ulixert/lithicdb/server"
+	"github.com/ulixert/theseon/db"
+	"github.com/ulixert/theseon/server"
 )
 
 func main() {
@@ -48,7 +48,7 @@ func main() {
 		srv.GracefulStop()
 	}()
 
-	log.Printf("lithicdb listening on %s (data: %s)", *addr, *dataDir)
+	log.Printf("theseon listening on %s (data: %s)", *addr, *dataDir)
 	if err := srv.Serve(lis); err != nil {
 		log.Fatalf("serve: %v", err)
 	}

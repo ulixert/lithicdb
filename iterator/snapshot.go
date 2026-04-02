@@ -3,7 +3,7 @@ package iterator
 import (
 	"bytes"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 // SnapshotIterator wraps a raw (all-versions) iterator and filters it

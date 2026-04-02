@@ -3,9 +3,9 @@ package compaction
 import (
 	"fmt"
 
-	"github.com/ulixert/lithicdb/iterator"
-	"github.com/ulixert/lithicdb/kv"
-	"github.com/ulixert/lithicdb/sstable"
+	"github.com/ulixert/theseon/iterator"
+	"github.com/ulixert/theseon/kv"
+	"github.com/ulixert/theseon/sstable"
 )
 
 // CompactionResult describes the output of a compaction.

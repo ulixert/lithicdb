@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 // Builder constructs an SSTable file from a sorted stream of

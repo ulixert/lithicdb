@@ -5,10 +5,10 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/ulixert/lithicdb/cluster"
-	"github.com/ulixert/lithicdb/db"
-	"github.com/ulixert/lithicdb/hlc"
-	pb "github.com/ulixert/lithicdb/proto/lithicpb"
+	"github.com/ulixert/theseon/cluster"
+	"github.com/ulixert/theseon/db"
+	"github.com/ulixert/theseon/hlc"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

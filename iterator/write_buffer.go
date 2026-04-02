@@ -1,6 +1,6 @@
 package iterator
 
-import "github.com/ulixert/lithicdb/kv"
+import "github.com/ulixert/theseon/kv"
 
 // WriteBufferEntry is a single entry in a transaction's write buffer,
 // stored as an internal key (user key + inverted seq) and a value.

@@ -1,4 +1,4 @@
-// Package cluster implements the distributed layer for LithicDB using
+// Package cluster implements the distributed layer for Theseon using
 // the SWIM protocol for decentralized failure detection and gossip-based
 // membership dissemination. Ring ownership is tracked separately and
 // only changes via explicit admin commands.

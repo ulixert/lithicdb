@@ -3,7 +3,7 @@ package iterator
 import (
 	"testing"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 func TestSnapshotIterator_FiltersAboveMaxSeq(t *testing.T) {

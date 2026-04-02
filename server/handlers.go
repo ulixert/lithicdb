@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 
-	"github.com/ulixert/lithicdb/kv"
-	pb "github.com/ulixert/lithicdb/proto/lithicpb"
+	"github.com/ulixert/theseon/kv"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -62,7 +62,7 @@ func (s *Server) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteR
 	return &pb.DeleteResponse{}, nil
 }
 
-func (s *Server) Scan(_ *pb.ScanRequest, stream pb.LithicDB_ScanServer) error {
+func (s *Server) Scan(_ *pb.ScanRequest, stream pb.Theseon_ScanServer) error {
 	iter := s.db.Scan()
 	defer iter.Close()
 

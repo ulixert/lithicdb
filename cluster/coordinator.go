@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ulixert/lithicdb/db"
-	"github.com/ulixert/lithicdb/hashring"
-	"github.com/ulixert/lithicdb/hlc"
-	pb "github.com/ulixert/lithicdb/proto/lithicpb"
+	"github.com/ulixert/theseon/db"
+	"github.com/ulixert/theseon/hashring"
+	"github.com/ulixert/theseon/hlc"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
 )
 
 var (

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ulixert/lithicdb/compaction"
-	"github.com/ulixert/lithicdb/manifest"
-	"github.com/ulixert/lithicdb/sstable"
+	"github.com/ulixert/theseon/compaction"
+	"github.com/ulixert/theseon/manifest"
+	"github.com/ulixert/theseon/sstable"
 )
 
 // idAllocator adapts DB's nextMemID counter to the

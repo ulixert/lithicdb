@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.1
-// source: proto/lithicpb/lithic.proto
+// source: proto/theseonpb/theseon.proto
 
-package lithicpb
+package theseonpb
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -31,7 +31,7 @@ type PutRequest struct {
 
 func (x *PutRequest) Reset() {
 	*x = PutRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[0]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -43,7 +43,7 @@ func (x *PutRequest) String() string {
 func (*PutRequest) ProtoMessage() {}
 
 func (x *PutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[0]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,7 +56,7 @@ func (x *PutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutRequest.ProtoReflect.Descriptor instead.
 func (*PutRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{0}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *PutRequest) GetKey() []byte {
@@ -81,7 +81,7 @@ type PutResponse struct {
 
 func (x *PutResponse) Reset() {
 	*x = PutResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[1]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -93,7 +93,7 @@ func (x *PutResponse) String() string {
 func (*PutResponse) ProtoMessage() {}
 
 func (x *PutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[1]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -106,7 +106,7 @@ func (x *PutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutResponse.ProtoReflect.Descriptor instead.
 func (*PutResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{1}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{1}
 }
 
 type GetRequest struct {
@@ -118,7 +118,7 @@ type GetRequest struct {
 
 func (x *GetRequest) Reset() {
 	*x = GetRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[2]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -130,7 +130,7 @@ func (x *GetRequest) String() string {
 func (*GetRequest) ProtoMessage() {}
 
 func (x *GetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[2]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -143,7 +143,7 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{2}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetRequest) GetKey() []byte {
@@ -163,7 +163,7 @@ type GetResponse struct {
 
 func (x *GetResponse) Reset() {
 	*x = GetResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[3]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -175,7 +175,7 @@ func (x *GetResponse) String() string {
 func (*GetResponse) ProtoMessage() {}
 
 func (x *GetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[3]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -188,7 +188,7 @@ func (x *GetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResponse.ProtoReflect.Descriptor instead.
 func (*GetResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{3}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetResponse) GetValue() []byte {
@@ -214,7 +214,7 @@ type DeleteRequest struct {
 
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[4]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -226,7 +226,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[4]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -239,7 +239,7 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{4}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DeleteRequest) GetKey() []byte {
@@ -257,7 +257,7 @@ type DeleteResponse struct {
 
 func (x *DeleteResponse) Reset() {
 	*x = DeleteResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[5]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -269,7 +269,7 @@ func (x *DeleteResponse) String() string {
 func (*DeleteResponse) ProtoMessage() {}
 
 func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[5]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -282,7 +282,7 @@ func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteResponse.ProtoReflect.Descriptor instead.
 func (*DeleteResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{5}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{5}
 }
 
 type ScanRequest struct {
@@ -293,7 +293,7 @@ type ScanRequest struct {
 
 func (x *ScanRequest) Reset() {
 	*x = ScanRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[6]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -305,7 +305,7 @@ func (x *ScanRequest) String() string {
 func (*ScanRequest) ProtoMessage() {}
 
 func (x *ScanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[6]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -318,7 +318,7 @@ func (x *ScanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanRequest.ProtoReflect.Descriptor instead.
 func (*ScanRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{6}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{6}
 }
 
 type ScanResponse struct {
@@ -331,7 +331,7 @@ type ScanResponse struct {
 
 func (x *ScanResponse) Reset() {
 	*x = ScanResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[7]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -343,7 +343,7 @@ func (x *ScanResponse) String() string {
 func (*ScanResponse) ProtoMessage() {}
 
 func (x *ScanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[7]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -356,7 +356,7 @@ func (x *ScanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanResponse.ProtoReflect.Descriptor instead.
 func (*ScanResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{7}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ScanResponse) GetKey() []byte {
@@ -382,7 +382,7 @@ type BatchWriteRequest struct {
 
 func (x *BatchWriteRequest) Reset() {
 	*x = BatchWriteRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[8]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -394,7 +394,7 @@ func (x *BatchWriteRequest) String() string {
 func (*BatchWriteRequest) ProtoMessage() {}
 
 func (x *BatchWriteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[8]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -407,7 +407,7 @@ func (x *BatchWriteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchWriteRequest.ProtoReflect.Descriptor instead.
 func (*BatchWriteRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{8}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *BatchWriteRequest) GetEntries() []*BatchEntry {
@@ -428,7 +428,7 @@ type BatchEntry struct {
 
 func (x *BatchEntry) Reset() {
 	*x = BatchEntry{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[9]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -440,7 +440,7 @@ func (x *BatchEntry) String() string {
 func (*BatchEntry) ProtoMessage() {}
 
 func (x *BatchEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[9]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -453,7 +453,7 @@ func (x *BatchEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchEntry.ProtoReflect.Descriptor instead.
 func (*BatchEntry) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{9}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *BatchEntry) GetKey() []byte {
@@ -485,7 +485,7 @@ type BatchWriteResponse struct {
 
 func (x *BatchWriteResponse) Reset() {
 	*x = BatchWriteResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[10]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -497,7 +497,7 @@ func (x *BatchWriteResponse) String() string {
 func (*BatchWriteResponse) ProtoMessage() {}
 
 func (x *BatchWriteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[10]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -510,7 +510,7 @@ func (x *BatchWriteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchWriteResponse.ProtoReflect.Descriptor instead.
 func (*BatchWriteResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{10}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{10}
 }
 
 // SWIM Ping - direct probe with piggybacked gossip updates and ring descriptor.
@@ -526,7 +526,7 @@ type PingRequest struct {
 
 func (x *PingRequest) Reset() {
 	*x = PingRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[11]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -538,7 +538,7 @@ func (x *PingRequest) String() string {
 func (*PingRequest) ProtoMessage() {}
 
 func (x *PingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[11]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -551,7 +551,7 @@ func (x *PingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingRequest.ProtoReflect.Descriptor instead.
 func (*PingRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{11}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *PingRequest) GetSenderId() string {
@@ -594,7 +594,7 @@ type PingResponse struct {
 
 func (x *PingResponse) Reset() {
 	*x = PingResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[12]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -606,7 +606,7 @@ func (x *PingResponse) String() string {
 func (*PingResponse) ProtoMessage() {}
 
 func (x *PingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[12]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -619,7 +619,7 @@ func (x *PingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingResponse.ProtoReflect.Descriptor instead.
 func (*PingResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{12}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *PingResponse) GetSenderId() string {
@@ -661,7 +661,7 @@ type PingReqRequest struct {
 
 func (x *PingReqRequest) Reset() {
 	*x = PingReqRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[13]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -673,7 +673,7 @@ func (x *PingReqRequest) String() string {
 func (*PingReqRequest) ProtoMessage() {}
 
 func (x *PingReqRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[13]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -686,7 +686,7 @@ func (x *PingReqRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingReqRequest.ProtoReflect.Descriptor instead.
 func (*PingReqRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{13}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *PingReqRequest) GetTargetId() string {
@@ -712,7 +712,7 @@ type PingReqResponse struct {
 
 func (x *PingReqResponse) Reset() {
 	*x = PingReqResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[14]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -724,7 +724,7 @@ func (x *PingReqResponse) String() string {
 func (*PingReqResponse) ProtoMessage() {}
 
 func (x *PingReqResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[14]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -737,7 +737,7 @@ func (x *PingReqResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingReqResponse.ProtoReflect.Descriptor instead.
 func (*PingReqResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{14}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PingReqResponse) GetAck() bool {
@@ -760,7 +760,7 @@ type GossipSyncRequest struct {
 
 func (x *GossipSyncRequest) Reset() {
 	*x = GossipSyncRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[15]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -772,7 +772,7 @@ func (x *GossipSyncRequest) String() string {
 func (*GossipSyncRequest) ProtoMessage() {}
 
 func (x *GossipSyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[15]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -785,7 +785,7 @@ func (x *GossipSyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GossipSyncRequest.ProtoReflect.Descriptor instead.
 func (*GossipSyncRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{15}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GossipSyncRequest) GetSenderId() string {
@@ -826,7 +826,7 @@ type GossipSyncResponse struct {
 
 func (x *GossipSyncResponse) Reset() {
 	*x = GossipSyncResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[16]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -838,7 +838,7 @@ func (x *GossipSyncResponse) String() string {
 func (*GossipSyncResponse) ProtoMessage() {}
 
 func (x *GossipSyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[16]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -851,7 +851,7 @@ func (x *GossipSyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GossipSyncResponse.ProtoReflect.Descriptor instead.
 func (*GossipSyncResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{16}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GossipSyncResponse) GetMembers() []*MemberUpdateProto {
@@ -882,7 +882,7 @@ type MemberUpdateProto struct {
 
 func (x *MemberUpdateProto) Reset() {
 	*x = MemberUpdateProto{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[17]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -894,7 +894,7 @@ func (x *MemberUpdateProto) String() string {
 func (*MemberUpdateProto) ProtoMessage() {}
 
 func (x *MemberUpdateProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[17]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -907,7 +907,7 @@ func (x *MemberUpdateProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberUpdateProto.ProtoReflect.Descriptor instead.
 func (*MemberUpdateProto) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{17}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MemberUpdateProto) GetNodeId() string {
@@ -956,7 +956,7 @@ type RingDescriptorProto struct {
 
 func (x *RingDescriptorProto) Reset() {
 	*x = RingDescriptorProto{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[18]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -968,7 +968,7 @@ func (x *RingDescriptorProto) String() string {
 func (*RingDescriptorProto) ProtoMessage() {}
 
 func (x *RingDescriptorProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[18]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -981,7 +981,7 @@ func (x *RingDescriptorProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RingDescriptorProto.ProtoReflect.Descriptor instead.
 func (*RingDescriptorProto) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{18}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *RingDescriptorProto) GetVersion() uint64 {
@@ -1009,7 +1009,7 @@ type RingMemberProto struct {
 
 func (x *RingMemberProto) Reset() {
 	*x = RingMemberProto{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[19]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1021,7 +1021,7 @@ func (x *RingMemberProto) String() string {
 func (*RingMemberProto) ProtoMessage() {}
 
 func (x *RingMemberProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[19]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1034,7 +1034,7 @@ func (x *RingMemberProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RingMemberProto.ProtoReflect.Descriptor instead.
 func (*RingMemberProto) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{19}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RingMemberProto) GetNodeId() string {
@@ -1069,7 +1069,7 @@ type HLCTimestamp struct {
 
 func (x *HLCTimestamp) Reset() {
 	*x = HLCTimestamp{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[20]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1081,7 +1081,7 @@ func (x *HLCTimestamp) String() string {
 func (*HLCTimestamp) ProtoMessage() {}
 
 func (x *HLCTimestamp) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[20]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1094,7 +1094,7 @@ func (x *HLCTimestamp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HLCTimestamp.ProtoReflect.Descriptor instead.
 func (*HLCTimestamp) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{20}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *HLCTimestamp) GetWallTime() int64 {
@@ -1131,7 +1131,7 @@ type ReplicateWriteRequest struct {
 
 func (x *ReplicateWriteRequest) Reset() {
 	*x = ReplicateWriteRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[21]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1143,7 +1143,7 @@ func (x *ReplicateWriteRequest) String() string {
 func (*ReplicateWriteRequest) ProtoMessage() {}
 
 func (x *ReplicateWriteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[21]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1156,7 +1156,7 @@ func (x *ReplicateWriteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicateWriteRequest.ProtoReflect.Descriptor instead.
 func (*ReplicateWriteRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{21}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ReplicateWriteRequest) GetKey() []byte {
@@ -1195,7 +1195,7 @@ type ReplicateWriteResponse struct {
 
 func (x *ReplicateWriteResponse) Reset() {
 	*x = ReplicateWriteResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[22]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1207,7 +1207,7 @@ func (x *ReplicateWriteResponse) String() string {
 func (*ReplicateWriteResponse) ProtoMessage() {}
 
 func (x *ReplicateWriteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[22]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1220,7 +1220,7 @@ func (x *ReplicateWriteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicateWriteResponse.ProtoReflect.Descriptor instead.
 func (*ReplicateWriteResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{22}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{22}
 }
 
 // ReplicateWriteBatch - batch of replicated writes (atomic).
@@ -1233,7 +1233,7 @@ type ReplicateWriteBatchRequest struct {
 
 func (x *ReplicateWriteBatchRequest) Reset() {
 	*x = ReplicateWriteBatchRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[23]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1245,7 +1245,7 @@ func (x *ReplicateWriteBatchRequest) String() string {
 func (*ReplicateWriteBatchRequest) ProtoMessage() {}
 
 func (x *ReplicateWriteBatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[23]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1258,7 +1258,7 @@ func (x *ReplicateWriteBatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicateWriteBatchRequest.ProtoReflect.Descriptor instead.
 func (*ReplicateWriteBatchRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{23}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ReplicateWriteBatchRequest) GetEntries() []*ReplicateWriteRequest {
@@ -1276,7 +1276,7 @@ type ReplicateWriteBatchResponse struct {
 
 func (x *ReplicateWriteBatchResponse) Reset() {
 	*x = ReplicateWriteBatchResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[24]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1288,7 +1288,7 @@ func (x *ReplicateWriteBatchResponse) String() string {
 func (*ReplicateWriteBatchResponse) ProtoMessage() {}
 
 func (x *ReplicateWriteBatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[24]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1301,7 +1301,7 @@ func (x *ReplicateWriteBatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicateWriteBatchResponse.ProtoReflect.Descriptor instead.
 func (*ReplicateWriteBatchResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{24}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{24}
 }
 
 // ReplicateRead - replica returns a single key with its envelope metadata.
@@ -1314,7 +1314,7 @@ type ReplicateReadRequest struct {
 
 func (x *ReplicateReadRequest) Reset() {
 	*x = ReplicateReadRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[25]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1326,7 +1326,7 @@ func (x *ReplicateReadRequest) String() string {
 func (*ReplicateReadRequest) ProtoMessage() {}
 
 func (x *ReplicateReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[25]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1339,7 +1339,7 @@ func (x *ReplicateReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicateReadRequest.ProtoReflect.Descriptor instead.
 func (*ReplicateReadRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{25}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ReplicateReadRequest) GetKey() []byte {
@@ -1361,7 +1361,7 @@ type ReplicateReadResponse struct {
 
 func (x *ReplicateReadResponse) Reset() {
 	*x = ReplicateReadResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[26]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1373,7 +1373,7 @@ func (x *ReplicateReadResponse) String() string {
 func (*ReplicateReadResponse) ProtoMessage() {}
 
 func (x *ReplicateReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[26]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1386,7 +1386,7 @@ func (x *ReplicateReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicateReadResponse.ProtoReflect.Descriptor instead.
 func (*ReplicateReadResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{26}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ReplicateReadResponse) GetValue() []byte {
@@ -1425,7 +1425,7 @@ type GetNodeInfoRequest struct {
 
 func (x *GetNodeInfoRequest) Reset() {
 	*x = GetNodeInfoRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[27]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1437,7 +1437,7 @@ func (x *GetNodeInfoRequest) String() string {
 func (*GetNodeInfoRequest) ProtoMessage() {}
 
 func (x *GetNodeInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[27]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1450,7 +1450,7 @@ func (x *GetNodeInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetNodeInfoRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{27}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{27}
 }
 
 type GetNodeInfoResponse struct {
@@ -1465,7 +1465,7 @@ type GetNodeInfoResponse struct {
 
 func (x *GetNodeInfoResponse) Reset() {
 	*x = GetNodeInfoResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[28]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1477,7 +1477,7 @@ func (x *GetNodeInfoResponse) String() string {
 func (*GetNodeInfoResponse) ProtoMessage() {}
 
 func (x *GetNodeInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[28]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1490,7 +1490,7 @@ func (x *GetNodeInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetNodeInfoResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{28}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *GetNodeInfoResponse) GetNodeId() string {
@@ -1529,7 +1529,7 @@ type GetClusterStatusRequest struct {
 
 func (x *GetClusterStatusRequest) Reset() {
 	*x = GetClusterStatusRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[29]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1541,7 +1541,7 @@ func (x *GetClusterStatusRequest) String() string {
 func (*GetClusterStatusRequest) ProtoMessage() {}
 
 func (x *GetClusterStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[29]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1554,7 +1554,7 @@ func (x *GetClusterStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetClusterStatusRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{29}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{29}
 }
 
 type GetClusterStatusResponse struct {
@@ -1567,7 +1567,7 @@ type GetClusterStatusResponse struct {
 
 func (x *GetClusterStatusResponse) Reset() {
 	*x = GetClusterStatusResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[30]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1579,7 +1579,7 @@ func (x *GetClusterStatusResponse) String() string {
 func (*GetClusterStatusResponse) ProtoMessage() {}
 
 func (x *GetClusterStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[30]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1592,7 +1592,7 @@ func (x *GetClusterStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetClusterStatusResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{30}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetClusterStatusResponse) GetMembers() []*MemberUpdateProto {
@@ -1619,7 +1619,7 @@ type JoinRingRequest struct {
 
 func (x *JoinRingRequest) Reset() {
 	*x = JoinRingRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[31]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1631,7 +1631,7 @@ func (x *JoinRingRequest) String() string {
 func (*JoinRingRequest) ProtoMessage() {}
 
 func (x *JoinRingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[31]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1644,7 +1644,7 @@ func (x *JoinRingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRingRequest.ProtoReflect.Descriptor instead.
 func (*JoinRingRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{31}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *JoinRingRequest) GetAddr() string {
@@ -1670,7 +1670,7 @@ type JoinRingResponse struct {
 
 func (x *JoinRingResponse) Reset() {
 	*x = JoinRingResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[32]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1682,7 +1682,7 @@ func (x *JoinRingResponse) String() string {
 func (*JoinRingResponse) ProtoMessage() {}
 
 func (x *JoinRingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[32]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1695,7 +1695,7 @@ func (x *JoinRingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRingResponse.ProtoReflect.Descriptor instead.
 func (*JoinRingResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{32}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *JoinRingResponse) GetNodeId() string {
@@ -1715,7 +1715,7 @@ type ActivateNodeRequest struct {
 
 func (x *ActivateNodeRequest) Reset() {
 	*x = ActivateNodeRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[33]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1727,7 +1727,7 @@ func (x *ActivateNodeRequest) String() string {
 func (*ActivateNodeRequest) ProtoMessage() {}
 
 func (x *ActivateNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[33]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1740,7 +1740,7 @@ func (x *ActivateNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateNodeRequest.ProtoReflect.Descriptor instead.
 func (*ActivateNodeRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{33}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ActivateNodeRequest) GetNodeId() string {
@@ -1765,7 +1765,7 @@ type ActivateNodeResponse struct {
 
 func (x *ActivateNodeResponse) Reset() {
 	*x = ActivateNodeResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[34]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1777,7 +1777,7 @@ func (x *ActivateNodeResponse) String() string {
 func (*ActivateNodeResponse) ProtoMessage() {}
 
 func (x *ActivateNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[34]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1790,7 +1790,7 @@ func (x *ActivateNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateNodeResponse.ProtoReflect.Descriptor instead.
 func (*ActivateNodeResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{34}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{34}
 }
 
 type RemoveNodeRequest struct {
@@ -1803,7 +1803,7 @@ type RemoveNodeRequest struct {
 
 func (x *RemoveNodeRequest) Reset() {
 	*x = RemoveNodeRequest{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[35]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1815,7 +1815,7 @@ func (x *RemoveNodeRequest) String() string {
 func (*RemoveNodeRequest) ProtoMessage() {}
 
 func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[35]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1828,7 +1828,7 @@ func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeRequest.ProtoReflect.Descriptor instead.
 func (*RemoveNodeRequest) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{35}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RemoveNodeRequest) GetNodeId() string {
@@ -1853,7 +1853,7 @@ type RemoveNodeResponse struct {
 
 func (x *RemoveNodeResponse) Reset() {
 	*x = RemoveNodeResponse{}
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[36]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1865,7 +1865,7 @@ func (x *RemoveNodeResponse) String() string {
 func (*RemoveNodeResponse) ProtoMessage() {}
 
 func (x *RemoveNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_lithicpb_lithic_proto_msgTypes[36]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1878,14 +1878,14 @@ func (x *RemoveNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeResponse.ProtoReflect.Descriptor instead.
 func (*RemoveNodeResponse) Descriptor() ([]byte, []int) {
-	return file_proto_lithicpb_lithic_proto_rawDescGZIP(), []int{36}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{36}
 }
 
-var File_proto_lithicpb_lithic_proto protoreflect.FileDescriptor
+var File_proto_theseonpb_theseon_proto protoreflect.FileDescriptor
 
-const file_proto_lithicpb_lithic_proto_rawDesc = "" +
+const file_proto_theseonpb_theseon_proto_rawDesc = "" +
 	"\n" +
-	"\x1bproto/lithicpb/lithic.proto\x12\blithicpb\"4\n" +
+	"\x1dproto/theseonpb/theseon.proto\x12\ttheseonpb\"4\n" +
 	"\n" +
 	"PutRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
@@ -1903,52 +1903,52 @@ const file_proto_lithicpb_lithic_proto_rawDesc = "" +
 	"\vScanRequest\"6\n" +
 	"\fScanResponse\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\"C\n" +
-	"\x11BatchWriteRequest\x12.\n" +
-	"\aentries\x18\x01 \x03(\v2\x14.lithicpb.BatchEntryR\aentries\"Q\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"D\n" +
+	"\x11BatchWriteRequest\x12/\n" +
+	"\aentries\x18\x01 \x03(\v2\x15.theseonpb.BatchEntryR\aentries\"Q\n" +
 	"\n" +
 	"BatchEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value\x12\x1b\n" +
 	"\tis_delete\x18\x03 \x01(\bR\bisDelete\"\x14\n" +
-	"\x12BatchWriteResponse\"\xca\x01\n" +
+	"\x12BatchWriteResponse\"\xcc\x01\n" +
 	"\vPingRequest\x12\x1b\n" +
 	"\tsender_id\x18\x01 \x01(\tR\bsenderId\x12\x1f\n" +
 	"\vsender_addr\x18\x02 \x01(\tR\n" +
-	"senderAddr\x125\n" +
-	"\aupdates\x18\x03 \x03(\v2\x1b.lithicpb.MemberUpdateProtoR\aupdates\x12F\n" +
-	"\x0fring_descriptor\x18\x04 \x01(\v2\x1d.lithicpb.RingDescriptorProtoR\x0eringDescriptor\"\xcb\x01\n" +
+	"senderAddr\x126\n" +
+	"\aupdates\x18\x03 \x03(\v2\x1c.theseonpb.MemberUpdateProtoR\aupdates\x12G\n" +
+	"\x0fring_descriptor\x18\x04 \x01(\v2\x1e.theseonpb.RingDescriptorProtoR\x0eringDescriptor\"\xcd\x01\n" +
 	"\fPingResponse\x12\x1b\n" +
 	"\tsender_id\x18\x01 \x01(\tR\bsenderId\x12\x1f\n" +
 	"\vsender_addr\x18\x02 \x01(\tR\n" +
-	"senderAddr\x125\n" +
-	"\aupdates\x18\x03 \x03(\v2\x1b.lithicpb.MemberUpdateProtoR\aupdates\x12F\n" +
-	"\x0fring_descriptor\x18\x04 \x01(\v2\x1d.lithicpb.RingDescriptorProtoR\x0eringDescriptor\"N\n" +
+	"senderAddr\x126\n" +
+	"\aupdates\x18\x03 \x03(\v2\x1c.theseonpb.MemberUpdateProtoR\aupdates\x12G\n" +
+	"\x0fring_descriptor\x18\x04 \x01(\v2\x1e.theseonpb.RingDescriptorProtoR\x0eringDescriptor\"N\n" +
 	"\x0ePingReqRequest\x12\x1b\n" +
 	"\ttarget_id\x18\x01 \x01(\tR\btargetId\x12\x1f\n" +
 	"\vtarget_addr\x18\x02 \x01(\tR\n" +
 	"targetAddr\"#\n" +
 	"\x0fPingReqResponse\x12\x10\n" +
-	"\x03ack\x18\x01 \x01(\bR\x03ack\"\xd0\x01\n" +
+	"\x03ack\x18\x01 \x01(\bR\x03ack\"\xd2\x01\n" +
 	"\x11GossipSyncRequest\x12\x1b\n" +
 	"\tsender_id\x18\x01 \x01(\tR\bsenderId\x12\x1f\n" +
 	"\vsender_addr\x18\x02 \x01(\tR\n" +
-	"senderAddr\x125\n" +
-	"\amembers\x18\x03 \x03(\v2\x1b.lithicpb.MemberUpdateProtoR\amembers\x12F\n" +
-	"\x0fring_descriptor\x18\x04 \x01(\v2\x1d.lithicpb.RingDescriptorProtoR\x0eringDescriptor\"\x93\x01\n" +
-	"\x12GossipSyncResponse\x125\n" +
-	"\amembers\x18\x01 \x03(\v2\x1b.lithicpb.MemberUpdateProtoR\amembers\x12F\n" +
-	"\x0fring_descriptor\x18\x02 \x01(\v2\x1d.lithicpb.RingDescriptorProtoR\x0eringDescriptor\"\x9d\x01\n" +
+	"senderAddr\x126\n" +
+	"\amembers\x18\x03 \x03(\v2\x1c.theseonpb.MemberUpdateProtoR\amembers\x12G\n" +
+	"\x0fring_descriptor\x18\x04 \x01(\v2\x1e.theseonpb.RingDescriptorProtoR\x0eringDescriptor\"\x95\x01\n" +
+	"\x12GossipSyncResponse\x126\n" +
+	"\amembers\x18\x01 \x03(\v2\x1c.theseonpb.MemberUpdateProtoR\amembers\x12G\n" +
+	"\x0fring_descriptor\x18\x02 \x01(\v2\x1e.theseonpb.RingDescriptorProtoR\x0eringDescriptor\"\x9d\x01\n" +
 	"\x11MemberUpdateProto\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x1a\n" +
 	"\bliveness\x18\x03 \x01(\x05R\bliveness\x12\x1d\n" +
 	"\n" +
 	"ring_state\x18\x04 \x01(\x05R\tringState\x12 \n" +
-	"\vincarnation\x18\x05 \x01(\x04R\vincarnation\"d\n" +
+	"\vincarnation\x18\x05 \x01(\x04R\vincarnation\"e\n" +
 	"\x13RingDescriptorProto\x12\x18\n" +
-	"\aversion\x18\x01 \x01(\x04R\aversion\x123\n" +
-	"\amembers\x18\x02 \x03(\v2\x19.lithicpb.RingMemberProtoR\amembers\"]\n" +
+	"\aversion\x18\x01 \x01(\x04R\aversion\x124\n" +
+	"\amembers\x18\x02 \x03(\v2\x1a.theseonpb.RingMemberProtoR\amembers\"]\n" +
 	"\x0fRingMemberProto\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x1d\n" +
@@ -1957,21 +1957,21 @@ const file_proto_lithicpb_lithic_proto_rawDesc = "" +
 	"\fHLCTimestamp\x12\x1b\n" +
 	"\twall_time\x18\x01 \x01(\x03R\bwallTime\x12\x18\n" +
 	"\alogical\x18\x02 \x01(\rR\alogical\x12\x17\n" +
-	"\anode_id\x18\x03 \x01(\tR\x06nodeId\"\x8f\x01\n" +
+	"\anode_id\x18\x03 \x01(\tR\x06nodeId\"\x90\x01\n" +
 	"\x15ReplicateWriteRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\x124\n" +
-	"\ttimestamp\x18\x03 \x01(\v2\x16.lithicpb.HLCTimestampR\ttimestamp\x12\x18\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\x125\n" +
+	"\ttimestamp\x18\x03 \x01(\v2\x17.theseonpb.HLCTimestampR\ttimestamp\x12\x18\n" +
 	"\adeleted\x18\x04 \x01(\bR\adeleted\"\x18\n" +
-	"\x16ReplicateWriteResponse\"W\n" +
-	"\x1aReplicateWriteBatchRequest\x129\n" +
-	"\aentries\x18\x01 \x03(\v2\x1f.lithicpb.ReplicateWriteRequestR\aentries\"\x1d\n" +
+	"\x16ReplicateWriteResponse\"X\n" +
+	"\x1aReplicateWriteBatchRequest\x12:\n" +
+	"\aentries\x18\x01 \x03(\v2 .theseonpb.ReplicateWriteRequestR\aentries\"\x1d\n" +
 	"\x1bReplicateWriteBatchResponse\"(\n" +
 	"\x14ReplicateReadRequest\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\fR\x03key\"\x93\x01\n" +
+	"\x03key\x18\x01 \x01(\fR\x03key\"\x94\x01\n" +
 	"\x15ReplicateReadResponse\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\fR\x05value\x124\n" +
-	"\ttimestamp\x18\x02 \x01(\v2\x16.lithicpb.HLCTimestampR\ttimestamp\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\fR\x05value\x125\n" +
+	"\ttimestamp\x18\x02 \x01(\v2\x17.theseonpb.HLCTimestampR\ttimestamp\x12\x14\n" +
 	"\x05found\x18\x03 \x01(\bR\x05found\x12\x18\n" +
 	"\adeleted\x18\x04 \x01(\bR\adeleted\"\x14\n" +
 	"\x12GetNodeInfoRequest\"}\n" +
@@ -1981,10 +1981,10 @@ const file_proto_lithicpb_lithic_proto_rawDesc = "" +
 	"\bliveness\x18\x03 \x01(\x05R\bliveness\x12\x1d\n" +
 	"\n" +
 	"ring_state\x18\x04 \x01(\x05R\tringState\"\x19\n" +
-	"\x17GetClusterStatusRequest\"\x99\x01\n" +
-	"\x18GetClusterStatusResponse\x125\n" +
-	"\amembers\x18\x01 \x03(\v2\x1b.lithicpb.MemberUpdateProtoR\amembers\x12F\n" +
-	"\x0fring_descriptor\x18\x02 \x01(\v2\x1d.lithicpb.RingDescriptorProtoR\x0eringDescriptor\"P\n" +
+	"\x17GetClusterStatusRequest\"\x9b\x01\n" +
+	"\x18GetClusterStatusResponse\x126\n" +
+	"\amembers\x18\x01 \x03(\v2\x1c.theseonpb.MemberUpdateProtoR\amembers\x12G\n" +
+	"\x0fring_descriptor\x18\x02 \x01(\v2\x1e.theseonpb.RingDescriptorProtoR\x0eringDescriptor\"P\n" +
 	"\x0fJoinRingRequest\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12)\n" +
 	"\x10expected_version\x18\x02 \x01(\x04R\x0fexpectedVersion\"+\n" +
@@ -1997,130 +1997,130 @@ const file_proto_lithicpb_lithic_proto_rawDesc = "" +
 	"\x11RemoveNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12)\n" +
 	"\x10expected_version\x18\x02 \x01(\x04R\x0fexpectedVersion\"\x14\n" +
-	"\x12RemoveNodeResponse2\xb1\x02\n" +
-	"\bLithicDB\x122\n" +
-	"\x03Put\x12\x14.lithicpb.PutRequest\x1a\x15.lithicpb.PutResponse\x122\n" +
-	"\x03Get\x12\x14.lithicpb.GetRequest\x1a\x15.lithicpb.GetResponse\x12;\n" +
-	"\x06Delete\x12\x17.lithicpb.DeleteRequest\x1a\x18.lithicpb.DeleteResponse\x127\n" +
-	"\x04Scan\x12\x15.lithicpb.ScanRequest\x1a\x16.lithicpb.ScanResponse0\x01\x12G\n" +
+	"\x12RemoveNodeResponse2\xba\x02\n" +
+	"\aTheseon\x124\n" +
+	"\x03Put\x12\x15.theseonpb.PutRequest\x1a\x16.theseonpb.PutResponse\x124\n" +
+	"\x03Get\x12\x15.theseonpb.GetRequest\x1a\x16.theseonpb.GetResponse\x12=\n" +
+	"\x06Delete\x12\x18.theseonpb.DeleteRequest\x1a\x19.theseonpb.DeleteResponse\x129\n" +
+	"\x04Scan\x12\x16.theseonpb.ScanRequest\x1a\x17.theseonpb.ScanResponse0\x01\x12I\n" +
 	"\n" +
-	"BatchWrite\x12\x1b.lithicpb.BatchWriteRequest\x1a\x1c.lithicpb.BatchWriteResponse2\xdc\x03\n" +
-	"\x0fInternalService\x125\n" +
-	"\x04Ping\x12\x15.lithicpb.PingRequest\x1a\x16.lithicpb.PingResponse\x12>\n" +
-	"\aPingReq\x12\x18.lithicpb.PingReqRequest\x1a\x19.lithicpb.PingReqResponse\x12G\n" +
+	"BatchWrite\x12\x1c.theseonpb.BatchWriteRequest\x1a\x1d.theseonpb.BatchWriteResponse2\xe8\x03\n" +
+	"\x0fInternalService\x127\n" +
+	"\x04Ping\x12\x16.theseonpb.PingRequest\x1a\x17.theseonpb.PingResponse\x12@\n" +
+	"\aPingReq\x12\x19.theseonpb.PingReqRequest\x1a\x1a.theseonpb.PingReqResponse\x12I\n" +
 	"\n" +
-	"GossipSync\x12\x1b.lithicpb.GossipSyncRequest\x1a\x1c.lithicpb.GossipSyncResponse\x12S\n" +
-	"\x0eReplicateWrite\x12\x1f.lithicpb.ReplicateWriteRequest\x1a .lithicpb.ReplicateWriteResponse\x12b\n" +
-	"\x13ReplicateWriteBatch\x12$.lithicpb.ReplicateWriteBatchRequest\x1a%.lithicpb.ReplicateWriteBatchResponse\x12P\n" +
-	"\rReplicateRead\x12\x1e.lithicpb.ReplicateReadRequest\x1a\x1f.lithicpb.ReplicateReadResponse2\x90\x03\n" +
-	"\fAdminService\x12J\n" +
-	"\vGetNodeInfo\x12\x1c.lithicpb.GetNodeInfoRequest\x1a\x1d.lithicpb.GetNodeInfoResponse\x12Y\n" +
-	"\x10GetClusterStatus\x12!.lithicpb.GetClusterStatusRequest\x1a\".lithicpb.GetClusterStatusResponse\x12A\n" +
-	"\bJoinRing\x12\x19.lithicpb.JoinRingRequest\x1a\x1a.lithicpb.JoinRingResponse\x12M\n" +
-	"\fActivateNode\x12\x1d.lithicpb.ActivateNodeRequest\x1a\x1e.lithicpb.ActivateNodeResponse\x12G\n" +
+	"GossipSync\x12\x1c.theseonpb.GossipSyncRequest\x1a\x1d.theseonpb.GossipSyncResponse\x12U\n" +
+	"\x0eReplicateWrite\x12 .theseonpb.ReplicateWriteRequest\x1a!.theseonpb.ReplicateWriteResponse\x12d\n" +
+	"\x13ReplicateWriteBatch\x12%.theseonpb.ReplicateWriteBatchRequest\x1a&.theseonpb.ReplicateWriteBatchResponse\x12R\n" +
+	"\rReplicateRead\x12\x1f.theseonpb.ReplicateReadRequest\x1a .theseonpb.ReplicateReadResponse2\x9a\x03\n" +
+	"\fAdminService\x12L\n" +
+	"\vGetNodeInfo\x12\x1d.theseonpb.GetNodeInfoRequest\x1a\x1e.theseonpb.GetNodeInfoResponse\x12[\n" +
+	"\x10GetClusterStatus\x12\".theseonpb.GetClusterStatusRequest\x1a#.theseonpb.GetClusterStatusResponse\x12C\n" +
+	"\bJoinRing\x12\x1a.theseonpb.JoinRingRequest\x1a\x1b.theseonpb.JoinRingResponse\x12O\n" +
+	"\fActivateNode\x12\x1e.theseonpb.ActivateNodeRequest\x1a\x1f.theseonpb.ActivateNodeResponse\x12I\n" +
 	"\n" +
-	"RemoveNode\x12\x1b.lithicpb.RemoveNodeRequest\x1a\x1c.lithicpb.RemoveNodeResponseB,Z*github.com/ulixert/lithicdb/proto/lithicpbb\x06proto3"
+	"RemoveNode\x12\x1c.theseonpb.RemoveNodeRequest\x1a\x1d.theseonpb.RemoveNodeResponseB,Z*github.com/ulixert/theseon/proto/theseonpbb\x06proto3"
 
 var (
-	file_proto_lithicpb_lithic_proto_rawDescOnce sync.Once
-	file_proto_lithicpb_lithic_proto_rawDescData []byte
+	file_proto_theseonpb_theseon_proto_rawDescOnce sync.Once
+	file_proto_theseonpb_theseon_proto_rawDescData []byte
 )
 
-func file_proto_lithicpb_lithic_proto_rawDescGZIP() []byte {
-	file_proto_lithicpb_lithic_proto_rawDescOnce.Do(func() {
-		file_proto_lithicpb_lithic_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_lithicpb_lithic_proto_rawDesc), len(file_proto_lithicpb_lithic_proto_rawDesc)))
+func file_proto_theseonpb_theseon_proto_rawDescGZIP() []byte {
+	file_proto_theseonpb_theseon_proto_rawDescOnce.Do(func() {
+		file_proto_theseonpb_theseon_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_theseonpb_theseon_proto_rawDesc), len(file_proto_theseonpb_theseon_proto_rawDesc)))
 	})
-	return file_proto_lithicpb_lithic_proto_rawDescData
+	return file_proto_theseonpb_theseon_proto_rawDescData
 }
 
-var file_proto_lithicpb_lithic_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
-var file_proto_lithicpb_lithic_proto_goTypes = []any{
-	(*PutRequest)(nil),                  // 0: lithicpb.PutRequest
-	(*PutResponse)(nil),                 // 1: lithicpb.PutResponse
-	(*GetRequest)(nil),                  // 2: lithicpb.GetRequest
-	(*GetResponse)(nil),                 // 3: lithicpb.GetResponse
-	(*DeleteRequest)(nil),               // 4: lithicpb.DeleteRequest
-	(*DeleteResponse)(nil),              // 5: lithicpb.DeleteResponse
-	(*ScanRequest)(nil),                 // 6: lithicpb.ScanRequest
-	(*ScanResponse)(nil),                // 7: lithicpb.ScanResponse
-	(*BatchWriteRequest)(nil),           // 8: lithicpb.BatchWriteRequest
-	(*BatchEntry)(nil),                  // 9: lithicpb.BatchEntry
-	(*BatchWriteResponse)(nil),          // 10: lithicpb.BatchWriteResponse
-	(*PingRequest)(nil),                 // 11: lithicpb.PingRequest
-	(*PingResponse)(nil),                // 12: lithicpb.PingResponse
-	(*PingReqRequest)(nil),              // 13: lithicpb.PingReqRequest
-	(*PingReqResponse)(nil),             // 14: lithicpb.PingReqResponse
-	(*GossipSyncRequest)(nil),           // 15: lithicpb.GossipSyncRequest
-	(*GossipSyncResponse)(nil),          // 16: lithicpb.GossipSyncResponse
-	(*MemberUpdateProto)(nil),           // 17: lithicpb.MemberUpdateProto
-	(*RingDescriptorProto)(nil),         // 18: lithicpb.RingDescriptorProto
-	(*RingMemberProto)(nil),             // 19: lithicpb.RingMemberProto
-	(*HLCTimestamp)(nil),                // 20: lithicpb.HLCTimestamp
-	(*ReplicateWriteRequest)(nil),       // 21: lithicpb.ReplicateWriteRequest
-	(*ReplicateWriteResponse)(nil),      // 22: lithicpb.ReplicateWriteResponse
-	(*ReplicateWriteBatchRequest)(nil),  // 23: lithicpb.ReplicateWriteBatchRequest
-	(*ReplicateWriteBatchResponse)(nil), // 24: lithicpb.ReplicateWriteBatchResponse
-	(*ReplicateReadRequest)(nil),        // 25: lithicpb.ReplicateReadRequest
-	(*ReplicateReadResponse)(nil),       // 26: lithicpb.ReplicateReadResponse
-	(*GetNodeInfoRequest)(nil),          // 27: lithicpb.GetNodeInfoRequest
-	(*GetNodeInfoResponse)(nil),         // 28: lithicpb.GetNodeInfoResponse
-	(*GetClusterStatusRequest)(nil),     // 29: lithicpb.GetClusterStatusRequest
-	(*GetClusterStatusResponse)(nil),    // 30: lithicpb.GetClusterStatusResponse
-	(*JoinRingRequest)(nil),             // 31: lithicpb.JoinRingRequest
-	(*JoinRingResponse)(nil),            // 32: lithicpb.JoinRingResponse
-	(*ActivateNodeRequest)(nil),         // 33: lithicpb.ActivateNodeRequest
-	(*ActivateNodeResponse)(nil),        // 34: lithicpb.ActivateNodeResponse
-	(*RemoveNodeRequest)(nil),           // 35: lithicpb.RemoveNodeRequest
-	(*RemoveNodeResponse)(nil),          // 36: lithicpb.RemoveNodeResponse
+var file_proto_theseonpb_theseon_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_proto_theseonpb_theseon_proto_goTypes = []any{
+	(*PutRequest)(nil),                  // 0: theseonpb.PutRequest
+	(*PutResponse)(nil),                 // 1: theseonpb.PutResponse
+	(*GetRequest)(nil),                  // 2: theseonpb.GetRequest
+	(*GetResponse)(nil),                 // 3: theseonpb.GetResponse
+	(*DeleteRequest)(nil),               // 4: theseonpb.DeleteRequest
+	(*DeleteResponse)(nil),              // 5: theseonpb.DeleteResponse
+	(*ScanRequest)(nil),                 // 6: theseonpb.ScanRequest
+	(*ScanResponse)(nil),                // 7: theseonpb.ScanResponse
+	(*BatchWriteRequest)(nil),           // 8: theseonpb.BatchWriteRequest
+	(*BatchEntry)(nil),                  // 9: theseonpb.BatchEntry
+	(*BatchWriteResponse)(nil),          // 10: theseonpb.BatchWriteResponse
+	(*PingRequest)(nil),                 // 11: theseonpb.PingRequest
+	(*PingResponse)(nil),                // 12: theseonpb.PingResponse
+	(*PingReqRequest)(nil),              // 13: theseonpb.PingReqRequest
+	(*PingReqResponse)(nil),             // 14: theseonpb.PingReqResponse
+	(*GossipSyncRequest)(nil),           // 15: theseonpb.GossipSyncRequest
+	(*GossipSyncResponse)(nil),          // 16: theseonpb.GossipSyncResponse
+	(*MemberUpdateProto)(nil),           // 17: theseonpb.MemberUpdateProto
+	(*RingDescriptorProto)(nil),         // 18: theseonpb.RingDescriptorProto
+	(*RingMemberProto)(nil),             // 19: theseonpb.RingMemberProto
+	(*HLCTimestamp)(nil),                // 20: theseonpb.HLCTimestamp
+	(*ReplicateWriteRequest)(nil),       // 21: theseonpb.ReplicateWriteRequest
+	(*ReplicateWriteResponse)(nil),      // 22: theseonpb.ReplicateWriteResponse
+	(*ReplicateWriteBatchRequest)(nil),  // 23: theseonpb.ReplicateWriteBatchRequest
+	(*ReplicateWriteBatchResponse)(nil), // 24: theseonpb.ReplicateWriteBatchResponse
+	(*ReplicateReadRequest)(nil),        // 25: theseonpb.ReplicateReadRequest
+	(*ReplicateReadResponse)(nil),       // 26: theseonpb.ReplicateReadResponse
+	(*GetNodeInfoRequest)(nil),          // 27: theseonpb.GetNodeInfoRequest
+	(*GetNodeInfoResponse)(nil),         // 28: theseonpb.GetNodeInfoResponse
+	(*GetClusterStatusRequest)(nil),     // 29: theseonpb.GetClusterStatusRequest
+	(*GetClusterStatusResponse)(nil),    // 30: theseonpb.GetClusterStatusResponse
+	(*JoinRingRequest)(nil),             // 31: theseonpb.JoinRingRequest
+	(*JoinRingResponse)(nil),            // 32: theseonpb.JoinRingResponse
+	(*ActivateNodeRequest)(nil),         // 33: theseonpb.ActivateNodeRequest
+	(*ActivateNodeResponse)(nil),        // 34: theseonpb.ActivateNodeResponse
+	(*RemoveNodeRequest)(nil),           // 35: theseonpb.RemoveNodeRequest
+	(*RemoveNodeResponse)(nil),          // 36: theseonpb.RemoveNodeResponse
 }
-var file_proto_lithicpb_lithic_proto_depIdxs = []int32{
-	9,  // 0: lithicpb.BatchWriteRequest.entries:type_name -> lithicpb.BatchEntry
-	17, // 1: lithicpb.PingRequest.updates:type_name -> lithicpb.MemberUpdateProto
-	18, // 2: lithicpb.PingRequest.ring_descriptor:type_name -> lithicpb.RingDescriptorProto
-	17, // 3: lithicpb.PingResponse.updates:type_name -> lithicpb.MemberUpdateProto
-	18, // 4: lithicpb.PingResponse.ring_descriptor:type_name -> lithicpb.RingDescriptorProto
-	17, // 5: lithicpb.GossipSyncRequest.members:type_name -> lithicpb.MemberUpdateProto
-	18, // 6: lithicpb.GossipSyncRequest.ring_descriptor:type_name -> lithicpb.RingDescriptorProto
-	17, // 7: lithicpb.GossipSyncResponse.members:type_name -> lithicpb.MemberUpdateProto
-	18, // 8: lithicpb.GossipSyncResponse.ring_descriptor:type_name -> lithicpb.RingDescriptorProto
-	19, // 9: lithicpb.RingDescriptorProto.members:type_name -> lithicpb.RingMemberProto
-	20, // 10: lithicpb.ReplicateWriteRequest.timestamp:type_name -> lithicpb.HLCTimestamp
-	21, // 11: lithicpb.ReplicateWriteBatchRequest.entries:type_name -> lithicpb.ReplicateWriteRequest
-	20, // 12: lithicpb.ReplicateReadResponse.timestamp:type_name -> lithicpb.HLCTimestamp
-	17, // 13: lithicpb.GetClusterStatusResponse.members:type_name -> lithicpb.MemberUpdateProto
-	18, // 14: lithicpb.GetClusterStatusResponse.ring_descriptor:type_name -> lithicpb.RingDescriptorProto
-	0,  // 15: lithicpb.LithicDB.Put:input_type -> lithicpb.PutRequest
-	2,  // 16: lithicpb.LithicDB.Get:input_type -> lithicpb.GetRequest
-	4,  // 17: lithicpb.LithicDB.Delete:input_type -> lithicpb.DeleteRequest
-	6,  // 18: lithicpb.LithicDB.Scan:input_type -> lithicpb.ScanRequest
-	8,  // 19: lithicpb.LithicDB.BatchWrite:input_type -> lithicpb.BatchWriteRequest
-	11, // 20: lithicpb.InternalService.Ping:input_type -> lithicpb.PingRequest
-	13, // 21: lithicpb.InternalService.PingReq:input_type -> lithicpb.PingReqRequest
-	15, // 22: lithicpb.InternalService.GossipSync:input_type -> lithicpb.GossipSyncRequest
-	21, // 23: lithicpb.InternalService.ReplicateWrite:input_type -> lithicpb.ReplicateWriteRequest
-	23, // 24: lithicpb.InternalService.ReplicateWriteBatch:input_type -> lithicpb.ReplicateWriteBatchRequest
-	25, // 25: lithicpb.InternalService.ReplicateRead:input_type -> lithicpb.ReplicateReadRequest
-	27, // 26: lithicpb.AdminService.GetNodeInfo:input_type -> lithicpb.GetNodeInfoRequest
-	29, // 27: lithicpb.AdminService.GetClusterStatus:input_type -> lithicpb.GetClusterStatusRequest
-	31, // 28: lithicpb.AdminService.JoinRing:input_type -> lithicpb.JoinRingRequest
-	33, // 29: lithicpb.AdminService.ActivateNode:input_type -> lithicpb.ActivateNodeRequest
-	35, // 30: lithicpb.AdminService.RemoveNode:input_type -> lithicpb.RemoveNodeRequest
-	1,  // 31: lithicpb.LithicDB.Put:output_type -> lithicpb.PutResponse
-	3,  // 32: lithicpb.LithicDB.Get:output_type -> lithicpb.GetResponse
-	5,  // 33: lithicpb.LithicDB.Delete:output_type -> lithicpb.DeleteResponse
-	7,  // 34: lithicpb.LithicDB.Scan:output_type -> lithicpb.ScanResponse
-	10, // 35: lithicpb.LithicDB.BatchWrite:output_type -> lithicpb.BatchWriteResponse
-	12, // 36: lithicpb.InternalService.Ping:output_type -> lithicpb.PingResponse
-	14, // 37: lithicpb.InternalService.PingReq:output_type -> lithicpb.PingReqResponse
-	16, // 38: lithicpb.InternalService.GossipSync:output_type -> lithicpb.GossipSyncResponse
-	22, // 39: lithicpb.InternalService.ReplicateWrite:output_type -> lithicpb.ReplicateWriteResponse
-	24, // 40: lithicpb.InternalService.ReplicateWriteBatch:output_type -> lithicpb.ReplicateWriteBatchResponse
-	26, // 41: lithicpb.InternalService.ReplicateRead:output_type -> lithicpb.ReplicateReadResponse
-	28, // 42: lithicpb.AdminService.GetNodeInfo:output_type -> lithicpb.GetNodeInfoResponse
-	30, // 43: lithicpb.AdminService.GetClusterStatus:output_type -> lithicpb.GetClusterStatusResponse
-	32, // 44: lithicpb.AdminService.JoinRing:output_type -> lithicpb.JoinRingResponse
-	34, // 45: lithicpb.AdminService.ActivateNode:output_type -> lithicpb.ActivateNodeResponse
-	36, // 46: lithicpb.AdminService.RemoveNode:output_type -> lithicpb.RemoveNodeResponse
+var file_proto_theseonpb_theseon_proto_depIdxs = []int32{
+	9,  // 0: theseonpb.BatchWriteRequest.entries:type_name -> theseonpb.BatchEntry
+	17, // 1: theseonpb.PingRequest.updates:type_name -> theseonpb.MemberUpdateProto
+	18, // 2: theseonpb.PingRequest.ring_descriptor:type_name -> theseonpb.RingDescriptorProto
+	17, // 3: theseonpb.PingResponse.updates:type_name -> theseonpb.MemberUpdateProto
+	18, // 4: theseonpb.PingResponse.ring_descriptor:type_name -> theseonpb.RingDescriptorProto
+	17, // 5: theseonpb.GossipSyncRequest.members:type_name -> theseonpb.MemberUpdateProto
+	18, // 6: theseonpb.GossipSyncRequest.ring_descriptor:type_name -> theseonpb.RingDescriptorProto
+	17, // 7: theseonpb.GossipSyncResponse.members:type_name -> theseonpb.MemberUpdateProto
+	18, // 8: theseonpb.GossipSyncResponse.ring_descriptor:type_name -> theseonpb.RingDescriptorProto
+	19, // 9: theseonpb.RingDescriptorProto.members:type_name -> theseonpb.RingMemberProto
+	20, // 10: theseonpb.ReplicateWriteRequest.timestamp:type_name -> theseonpb.HLCTimestamp
+	21, // 11: theseonpb.ReplicateWriteBatchRequest.entries:type_name -> theseonpb.ReplicateWriteRequest
+	20, // 12: theseonpb.ReplicateReadResponse.timestamp:type_name -> theseonpb.HLCTimestamp
+	17, // 13: theseonpb.GetClusterStatusResponse.members:type_name -> theseonpb.MemberUpdateProto
+	18, // 14: theseonpb.GetClusterStatusResponse.ring_descriptor:type_name -> theseonpb.RingDescriptorProto
+	0,  // 15: theseonpb.Theseon.Put:input_type -> theseonpb.PutRequest
+	2,  // 16: theseonpb.Theseon.Get:input_type -> theseonpb.GetRequest
+	4,  // 17: theseonpb.Theseon.Delete:input_type -> theseonpb.DeleteRequest
+	6,  // 18: theseonpb.Theseon.Scan:input_type -> theseonpb.ScanRequest
+	8,  // 19: theseonpb.Theseon.BatchWrite:input_type -> theseonpb.BatchWriteRequest
+	11, // 20: theseonpb.InternalService.Ping:input_type -> theseonpb.PingRequest
+	13, // 21: theseonpb.InternalService.PingReq:input_type -> theseonpb.PingReqRequest
+	15, // 22: theseonpb.InternalService.GossipSync:input_type -> theseonpb.GossipSyncRequest
+	21, // 23: theseonpb.InternalService.ReplicateWrite:input_type -> theseonpb.ReplicateWriteRequest
+	23, // 24: theseonpb.InternalService.ReplicateWriteBatch:input_type -> theseonpb.ReplicateWriteBatchRequest
+	25, // 25: theseonpb.InternalService.ReplicateRead:input_type -> theseonpb.ReplicateReadRequest
+	27, // 26: theseonpb.AdminService.GetNodeInfo:input_type -> theseonpb.GetNodeInfoRequest
+	29, // 27: theseonpb.AdminService.GetClusterStatus:input_type -> theseonpb.GetClusterStatusRequest
+	31, // 28: theseonpb.AdminService.JoinRing:input_type -> theseonpb.JoinRingRequest
+	33, // 29: theseonpb.AdminService.ActivateNode:input_type -> theseonpb.ActivateNodeRequest
+	35, // 30: theseonpb.AdminService.RemoveNode:input_type -> theseonpb.RemoveNodeRequest
+	1,  // 31: theseonpb.Theseon.Put:output_type -> theseonpb.PutResponse
+	3,  // 32: theseonpb.Theseon.Get:output_type -> theseonpb.GetResponse
+	5,  // 33: theseonpb.Theseon.Delete:output_type -> theseonpb.DeleteResponse
+	7,  // 34: theseonpb.Theseon.Scan:output_type -> theseonpb.ScanResponse
+	10, // 35: theseonpb.Theseon.BatchWrite:output_type -> theseonpb.BatchWriteResponse
+	12, // 36: theseonpb.InternalService.Ping:output_type -> theseonpb.PingResponse
+	14, // 37: theseonpb.InternalService.PingReq:output_type -> theseonpb.PingReqResponse
+	16, // 38: theseonpb.InternalService.GossipSync:output_type -> theseonpb.GossipSyncResponse
+	22, // 39: theseonpb.InternalService.ReplicateWrite:output_type -> theseonpb.ReplicateWriteResponse
+	24, // 40: theseonpb.InternalService.ReplicateWriteBatch:output_type -> theseonpb.ReplicateWriteBatchResponse
+	26, // 41: theseonpb.InternalService.ReplicateRead:output_type -> theseonpb.ReplicateReadResponse
+	28, // 42: theseonpb.AdminService.GetNodeInfo:output_type -> theseonpb.GetNodeInfoResponse
+	30, // 43: theseonpb.AdminService.GetClusterStatus:output_type -> theseonpb.GetClusterStatusResponse
+	32, // 44: theseonpb.AdminService.JoinRing:output_type -> theseonpb.JoinRingResponse
+	34, // 45: theseonpb.AdminService.ActivateNode:output_type -> theseonpb.ActivateNodeResponse
+	36, // 46: theseonpb.AdminService.RemoveNode:output_type -> theseonpb.RemoveNodeResponse
 	31, // [31:47] is the sub-list for method output_type
 	15, // [15:31] is the sub-list for method input_type
 	15, // [15:15] is the sub-list for extension type_name
@@ -2128,26 +2128,26 @@ var file_proto_lithicpb_lithic_proto_depIdxs = []int32{
 	0,  // [0:15] is the sub-list for field type_name
 }
 
-func init() { file_proto_lithicpb_lithic_proto_init() }
-func file_proto_lithicpb_lithic_proto_init() {
-	if File_proto_lithicpb_lithic_proto != nil {
+func init() { file_proto_theseonpb_theseon_proto_init() }
+func file_proto_theseonpb_theseon_proto_init() {
+	if File_proto_theseonpb_theseon_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_lithicpb_lithic_proto_rawDesc), len(file_proto_lithicpb_lithic_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_theseonpb_theseon_proto_rawDesc), len(file_proto_theseonpb_theseon_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   3,
 		},
-		GoTypes:           file_proto_lithicpb_lithic_proto_goTypes,
-		DependencyIndexes: file_proto_lithicpb_lithic_proto_depIdxs,
-		MessageInfos:      file_proto_lithicpb_lithic_proto_msgTypes,
+		GoTypes:           file_proto_theseonpb_theseon_proto_goTypes,
+		DependencyIndexes: file_proto_theseonpb_theseon_proto_depIdxs,
+		MessageInfos:      file_proto_theseonpb_theseon_proto_msgTypes,
 	}.Build()
-	File_proto_lithicpb_lithic_proto = out.File
-	file_proto_lithicpb_lithic_proto_goTypes = nil
-	file_proto_lithicpb_lithic_proto_depIdxs = nil
+	File_proto_theseonpb_theseon_proto = out.File
+	file_proto_theseonpb_theseon_proto_goTypes = nil
+	file_proto_theseonpb_theseon_proto_depIdxs = nil
 }

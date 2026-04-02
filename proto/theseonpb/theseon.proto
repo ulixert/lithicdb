@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-package lithicpb;
+package theseonpb;
 
-option go_package = "github.com/ulixert/lithicdb/proto/lithicpb";
+option go_package = "github.com/ulixert/theseon/proto/theseonpb";
 
 // ---- Client-facing service ----
 
-service LithicDB {
+service Theseon {
   rpc Put(PutRequest) returns (PutResponse);
   rpc Get(GetRequest) returns (GetResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);

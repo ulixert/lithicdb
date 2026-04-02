@@ -3,7 +3,7 @@ package itertest
 import (
 	"testing"
 
-	"github.com/ulixert/lithicdb/iterator"
+	"github.com/ulixert/theseon/iterator"
 )
 
 // Entry is a key-value pair used in test expectations.

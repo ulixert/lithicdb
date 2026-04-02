@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ulixert/lithicdb/compaction"
-	"github.com/ulixert/lithicdb/iterator"
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/compaction"
+	"github.com/ulixert/theseon/iterator"
+	"github.com/ulixert/theseon/kv"
 )
 
 func testOpts(dir string) Options {

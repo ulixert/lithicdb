@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ulixert/lithicdb/hlc"
+	"github.com/ulixert/theseon/hlc"
 )
 
 const (

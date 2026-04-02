@@ -3,7 +3,7 @@ package sstable
 import (
 	"bytes"
 
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/kv"
 )
 
 // SSTableIterator walks through an SSTable's entries in sorted key

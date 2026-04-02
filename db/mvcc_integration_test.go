@@ -214,7 +214,7 @@ func TestMVCC_SnapshotPreventsTombstoneGC(t *testing.T) {
 // TestMVCC_AllSnapshotsClosedAllowsGC verifies that once all snapshots
 // are closed, compaction can drop old versions.
 func TestMVCC_AllSnapshotsClosedAllowsGC(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-gc-*")
+	dir, err := os.MkdirTemp("", "theseon-gc-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestMVCC_LargeWriteBatchInTransaction(t *testing.T) {
 // TestMVCC_SnapshotAfterRecovery verifies that after a crash and
 // recovery, snapshots work correctly with the restored sequence numbers.
 func TestMVCC_SnapshotAfterRecovery(t *testing.T) {
-	dir, err := os.MkdirTemp("", "lithic-recovery-*")
+	dir, err := os.MkdirTemp("", "theseon-recovery-*")
 	if err != nil {
 		t.Fatal(err)
 	}

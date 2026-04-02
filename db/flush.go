@@ -3,11 +3,11 @@ package db
 import (
 	"fmt"
 
-	"github.com/ulixert/lithicdb/kv"
-	"github.com/ulixert/lithicdb/manifest"
-	"github.com/ulixert/lithicdb/memtable"
-	"github.com/ulixert/lithicdb/sstable"
-	"github.com/ulixert/lithicdb/wal"
+	"github.com/ulixert/theseon/kv"
+	"github.com/ulixert/theseon/manifest"
+	"github.com/ulixert/theseon/memtable"
+	"github.com/ulixert/theseon/sstable"
+	"github.com/ulixert/theseon/wal"
 )
 
 func (db *DB) flushLoop() {

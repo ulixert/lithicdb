@@ -1,4 +1,4 @@
-module github.com/ulixert/lithicdb
+module github.com/ulixert/theseon
 
 go 1.26.1
 

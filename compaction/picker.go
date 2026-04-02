@@ -3,8 +3,8 @@ package compaction
 import (
 	"bytes"
 
-	"github.com/ulixert/lithicdb/kv"
-	"github.com/ulixert/lithicdb/sstable"
+	"github.com/ulixert/theseon/kv"
+	"github.com/ulixert/theseon/sstable"
 )
 
 // Config controls compaction behavior.

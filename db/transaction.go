@@ -4,8 +4,8 @@ import (
 	"slices"
 	"sync/atomic"
 
-	"github.com/ulixert/lithicdb/iterator"
-	"github.com/ulixert/lithicdb/kv"
+	"github.com/ulixert/theseon/iterator"
+	"github.com/ulixert/theseon/kv"
 )
 
 // txWrite holds a single buffered write in a transaction.
