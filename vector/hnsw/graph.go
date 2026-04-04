@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"math/rand/v2"
+	"sort"
 	"sync"
 )
 
@@ -142,4 +144,211 @@ func (g *Graph) estimateNodeMemory(level int) int64 {
 		neighborBytes += int64(g.neighborCap(l)) * 8
 	}
 	return vecBytes + neighborBytes + nodeOverhead
+}
+
+// randomLevel generates a random level for a new node using the
+// geometric distribution from the HNSW paper.
+func (g *Graph) randomLevel() int {
+	return int(math.Floor(-math.Log(rand.Float64()) * g.mL))
+}
+
+// Insert adds a vector to the graph. Returns ErrDuplicateID if the id
+// already exists, ErrDimensionMismatch if the vector length is wrong,
+// or ErrMemoryLimitExceeded if the soft memory cap would be exceeded.
+func (g *Graph) Insert(id uint64, vec []float32) error {
+	if len(vec) != g.opts.Dim {
+		return ErrDimensionMismatch
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if _, exists := g.nodes[id]; exists {
+		return ErrDuplicateID
+	}
+
+	level := g.randomLevel()
+	mem := g.estimateNodeMemory(level)
+	if g.opts.MaxMemoryBytes > 0 && g.memoryBytes+mem > g.opts.MaxMemoryBytes {
+		return ErrMemoryLimitExceeded
+	}
+
+	node := &Node{
+		ID:        id,
+		Vector:    make([]float32, len(vec)),
+		Level:     level,
+		Neighbors: make([][]uint64, level+1),
+	}
+	copy(node.Vector, vec)
+	for l := 0; l <= level; l++ {
+		node.Neighbors[l] = make([]uint64, 0, g.neighborCap(l))
+	}
+
+	g.nodes[id] = node
+	g.memoryBytes += mem
+
+	// First node becomes the entry point.
+	if len(g.nodes) == 1 {
+		g.entryPoint = id
+		g.maxLevel = level
+		return nil
+	}
+
+	ep := g.entryPoint
+	dist := g.opts.Dist
+
+	// Phase 1: Greedy descent from maxLevel to level+1.
+	// Find the single closest node at each layer above the new node's level.
+	for l := g.maxLevel; l > level; l-- {
+		ep = g.greedyClosest(vec, ep, l, dist)
+	}
+
+	// Phase 2: Search-and-connect from min(level, maxLevel) down to layer 0.
+	topLayer := level
+	if g.maxLevel < topLayer {
+		topLayer = g.maxLevel
+	}
+	entryIDs := []uint64{ep}
+	for l := topLayer; l >= 0; l-- {
+		candidates := g.searchLayer(vec, entryIDs, g.opts.EfConstruct, l)
+		neighbors := g.selectNeighborsHeuristic(vec, candidates, g.neighborCap(l))
+
+		// Connect the new node to selected neighbors.
+		node.Neighbors[l] = make([]uint64, len(neighbors))
+		for i, n := range neighbors {
+			node.Neighbors[l][i] = n.id
+		}
+
+		// Add reverse edges and shrink if overflowed.
+		for _, n := range neighbors {
+			neighbor := g.nodes[n.id]
+			neighbor.Neighbors[l] = append(neighbor.Neighbors[l], id)
+			capacity := g.neighborCap(l)
+			if len(neighbor.Neighbors[l]) > capacity {
+				g.shrinkNeighbors(neighbor, l, capacity)
+			}
+		}
+
+		// Carry forward ALL search results as entry points for the next layer.
+		// The paper uses W (full search result set), not just the selected neighbors,
+		// so the lower-layer search starts from a broader set of positions.
+		entryIDs = make([]uint64, len(candidates))
+		for i, c := range candidates {
+			entryIDs[i] = c.id
+		}
+	}
+
+	// Update entry point if the new node has a higher level.
+	if level > g.maxLevel {
+		g.entryPoint = id
+		g.maxLevel = level
+	}
+
+	return nil
+}
+
+// greedyClosest walks from ep through the given layer, always moving to
+// the neighbor closest to query, until no improvement is found.
+func (g *Graph) greedyClosest(query []float32, ep uint64, layer int, dist DistanceFunc) uint64 {
+	bestID := ep
+	bestDist := dist(query, g.nodes[ep].Vector)
+	for {
+		improved := false
+		for _, nid := range g.nodes[bestID].Neighbors[layer] {
+			if n, ok := g.nodes[nid]; ok {
+				d := dist(query, n.Vector)
+				if d < bestDist {
+					bestID = nid
+					bestDist = d
+					improved = true
+				}
+			}
+		}
+		if !improved {
+			return bestID
+		}
+	}
+}
+
+// selectNeighborsHeuristic implements Algorithm 4 from the HNSW paper.
+// It selects up to maxN neighbors that are diverse: a candidate is only
+// selected if it is closer to the query than to any already-selected neighbor.
+// This prevents selecting clusters of nearby nodes as neighbors, improving
+// graph navigability and recall.
+func (g *Graph) selectNeighborsHeuristic(query []float32, candidates []heapItem, maxN int) []heapItem {
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].dist < candidates[j].dist
+	})
+
+	selected := make([]heapItem, 0, maxN)
+	for _, c := range candidates {
+		if len(selected) >= maxN {
+			break
+		}
+		// Check if c is closer to the query than to any already-selected neighbor.
+		good := true
+		cNode := g.nodes[c.id]
+		for _, s := range selected {
+			sNode := g.nodes[s.id]
+			if g.opts.Dist(cNode.Vector, sNode.Vector) < c.dist {
+				good = false
+				break
+			}
+		}
+		if good {
+			selected = append(selected, c)
+		}
+	}
+
+	// If the heuristic didn't fill up to maxN, add discarded candidates
+	// by distance order (keepPrunedConnections = true).
+	if len(selected) < maxN {
+		selectedSet := make(map[uint64]bool, len(selected))
+		for _, s := range selected {
+			selectedSet[s.id] = true
+		}
+		for _, c := range candidates {
+			if len(selected) >= maxN {
+				break
+			}
+			if !selectedSet[c.id] {
+				selected = append(selected, c)
+			}
+		}
+	}
+
+	return selected
+}
+
+// shrinkNeighbors trims the node's neighbor list at the given layer to maxN
+// by keeping the closest neighbors to the node itself.
+func (g *Graph) shrinkNeighbors(node *Node, layer int, maxN int) {
+	nbs := node.Neighbors[layer]
+	type nd struct {
+		id   uint64
+		dist float32
+	}
+	ranked := make([]nd, 0, len(nbs))
+	for _, nid := range nbs {
+		if n, ok := g.nodes[nid]; ok {
+			ranked = append(ranked, nd{nid, g.opts.Dist(node.Vector, n.Vector)})
+		}
+	}
+	// Simple selection sort is fine for small M (typically 16-32).
+	for i := 0; i < len(ranked)-1; i++ {
+		minIdx := i
+		for j := i + 1; j < len(ranked); j++ {
+			if ranked[j].dist < ranked[minIdx].dist {
+				minIdx = j
+			}
+		}
+		ranked[i], ranked[minIdx] = ranked[minIdx], ranked[i]
+	}
+	if len(ranked) > maxN {
+		ranked = ranked[:maxN]
+	}
+	node.Neighbors[layer] = node.Neighbors[layer][:len(ranked)]
+	for i, n := range ranked {
+		node.Neighbors[layer][i] = n.id
+	}
 }
