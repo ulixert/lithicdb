@@ -1,12 +1,13 @@
 package hnsw
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"math/rand/v2"
-	"sort"
+	"slices"
 	"sync"
 )
 
@@ -276,8 +277,8 @@ func (g *Graph) greedyClosest(query []float32, ep uint64, layer int, dist Distan
 // This prevents selecting clusters of nearby nodes as neighbors, improving
 // graph navigability and recall.
 func (g *Graph) selectNeighborsHeuristic(query []float32, candidates []heapItem, maxN int) []heapItem {
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].dist < candidates[j].dist
+	slices.SortFunc(candidates, func(a, b heapItem) int {
+		return cmp.Compare(a.dist, b.dist)
 	})
 
 	selected := make([]heapItem, 0, maxN)
@@ -334,21 +335,44 @@ func (g *Graph) shrinkNeighbors(node *Node, layer int, maxN int) {
 			ranked = append(ranked, nd{nid, g.opts.Dist(node.Vector, n.Vector)})
 		}
 	}
-	// Simple selection sort is fine for small M (typically 16-32).
-	for i := 0; i < len(ranked)-1; i++ {
-		minIdx := i
-		for j := i + 1; j < len(ranked); j++ {
-			if ranked[j].dist < ranked[minIdx].dist {
-				minIdx = j
-			}
-		}
-		ranked[i], ranked[minIdx] = ranked[minIdx], ranked[i]
-	}
+	slices.SortFunc(ranked, func(a, b nd) int {
+		return cmp.Compare(a.dist, b.dist)
+	})
 	if len(ranked) > maxN {
 		ranked = ranked[:maxN]
 	}
 	node.Neighbors[layer] = node.Neighbors[layer][:len(ranked)]
 	for i, n := range ranked {
 		node.Neighbors[layer][i] = n.id
+	}
+}
+
+// MarkDeleted soft-deletes a node. It remains in the graph for navigability
+// (its neighbors are still explored during search) but is excluded from
+// search results. Use Cleanup to physically remove tombstoned nodes.
+func (g *Graph) MarkDeleted(id uint64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, ok := g.nodes[id]; ok {
+		g.tombstones[id] = true
+	}
+}
+
+// Len returns the number of live (non-tombstoned) nodes.
+func (g *Graph) Len() int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return len(g.nodes) - len(g.tombstones)
+}
+
+// Stats returns a snapshot of the graph's current state.
+func (g *Graph) Stats() Stats {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return Stats{
+		TotalNodes:  len(g.nodes),
+		Tombstoned:  len(g.tombstones),
+		MaxLevel:    g.maxLevel,
+		MemoryBytes: g.memoryBytes,
 	}
 }
