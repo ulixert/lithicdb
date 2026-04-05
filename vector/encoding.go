@@ -118,3 +118,97 @@ func EncodeVector(vec []float32, metadata Metadata) ([]byte, error) {
 
 	return buf, nil
 }
+
+// DecodeVector deserializes a vector and its metadata from binary data.
+func DecodeVector(data []byte) ([]float32, Metadata, error) {
+	if len(data) < 3 {
+		return nil, nil, fmt.Errorf("vector: data too short (%d bytes)", len(data))
+	}
+
+	version := data[0]
+	if version != encodingVersion {
+		return nil, nil, fmt.Errorf("vector: unsupported encoding version %d", version)
+	}
+
+	dim := int(binary.LittleEndian.Uint16(data[1:3]))
+	off := 3
+
+	// Vector data.
+	needed := dim * 4
+	if off+needed > len(data) {
+		return nil, nil, fmt.Errorf("vector: truncated vector data (need %d bytes at offset %d, have %d)", needed, off, len(data))
+	}
+	vec := make([]float32, dim)
+	for i := range vec {
+		vec[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[off:]))
+		off += 4
+	}
+
+	// Metadata.
+	if off+2 > len(data) {
+		return nil, nil, fmt.Errorf("vector: truncated metadata header at offset %d", off)
+	}
+	numFields := int(binary.LittleEndian.Uint16(data[off:]))
+	off += 2
+
+	meta := make(Metadata, numFields)
+	for i := 0; i < numFields; i++ {
+		if off+2 > len(data) {
+			return nil, nil, fmt.Errorf("vector: truncated field name length at field %d", i)
+		}
+		nameLen := int(binary.LittleEndian.Uint16(data[off:]))
+		off += 2
+
+		if off+nameLen > len(data) {
+			return nil, nil, fmt.Errorf("vector: truncated field name at field %d", i)
+		}
+		name := string(data[off : off+nameLen])
+		off += nameLen
+
+		if off+1 > len(data) {
+			return nil, nil, fmt.Errorf("vector: truncated type tag at field %d", i)
+		}
+		typeByte := data[off]
+		off++
+
+		if off+2 > len(data) {
+			return nil, nil, fmt.Errorf("vector: truncated value length at field %d", i)
+		}
+		valLen := int(binary.LittleEndian.Uint16(data[off:]))
+		off += 2
+
+		if off+valLen > len(data) {
+			return nil, nil, fmt.Errorf("vector: truncated value at field %d", i)
+		}
+		valBytes := data[off : off+valLen]
+		off += valLen
+
+		switch typeByte {
+		case metaTypeString:
+			meta[name] = string(valBytes)
+		case metaTypeInt64:
+			if valLen != 8 {
+				return nil, nil, fmt.Errorf("vector: int64 field %q has %d bytes, want 8", name, valLen)
+			}
+			meta[name] = int64(binary.LittleEndian.Uint64(valBytes))
+		case metaTypeFloat64:
+			if valLen != 8 {
+				return nil, nil, fmt.Errorf("vector: float64 field %q has %d bytes, want 8", name, valLen)
+			}
+			meta[name] = math.Float64frombits(binary.LittleEndian.Uint64(valBytes))
+		case metaTypeBool:
+			if valLen != 1 {
+				return nil, nil, fmt.Errorf("vector: bool field %q has %d bytes, want 1", name, valLen)
+			}
+			meta[name] = valBytes[0] != 0
+		case metaTypeBytes:
+			cp := make([]byte, valLen)
+			copy(cp, valBytes)
+			meta[name] = cp
+		default:
+			return nil, nil, fmt.Errorf("vector: unknown type tag %d for field %q", typeByte, name)
+		}
+	}
+
+	return vec, meta, nil
+}
