@@ -16,7 +16,7 @@ func TestSearch_EmptyGraph(t *testing.T) {
 
 func TestSearch_DimensionMismatch(t *testing.T) {
 	g := testGraph(t, 4)
-	g.Insert(0, []float32{1, 2, 3, 4})
+	g.Insert(0, [16]byte{}, []float32{1, 2, 3, 4})
 	_, err := g.Search([]float32{1, 2, 3}, 1, nil)
 	if err != ErrDimensionMismatch {
 		t.Errorf("got %v, want ErrDimensionMismatch", err)
@@ -25,7 +25,7 @@ func TestSearch_DimensionMismatch(t *testing.T) {
 
 func TestSearch_SingleNode(t *testing.T) {
 	g := testGraph(t, 4)
-	g.Insert(42, []float32{1, 2, 3, 4})
+	g.Insert(42, [16]byte{}, []float32{1, 2, 3, 4})
 	results, err := g.Search([]float32{1, 2, 3, 4}, 1, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestSearch_BruteForceEquivalence(t *testing.T) {
 	vecs := make([][]float32, n)
 	for i := 0; i < n; i++ {
 		vecs[i] = randomVec(dim)
-		if err := g.Insert(uint64(i), vecs[i]); err != nil {
+		if err := g.Insert(uint64(i), [16]byte{}, vecs[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -93,7 +93,7 @@ func TestSearch_BruteForceEquivalence(t *testing.T) {
 func TestSearch_TombstoneFiltering(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 100; i++ {
-		if err := g.Insert(i, randomVec(4)); err != nil {
+		if err := g.Insert(i, [16]byte{}, randomVec(4)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -133,7 +133,7 @@ func TestSearch_TombstoneTraversal(t *testing.T) {
 
 	// Create a line of 20 nodes at (i, 0).
 	for i := 0; i < 20; i++ {
-		if err := g.Insert(uint64(i), []float32{float32(i), 0}); err != nil {
+		if err := g.Insert(uint64(i), [16]byte{}, []float32{float32(i), 0}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -164,7 +164,7 @@ func TestSearch_TombstoneTraversal(t *testing.T) {
 func TestSearch_EfSearchOverride(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 50; i++ {
-		if err := g.Insert(i, randomVec(4)); err != nil {
+		if err := g.Insert(i, [16]byte{}, randomVec(4)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -180,7 +180,7 @@ func TestSearch_EfSearchOverride(t *testing.T) {
 func TestSearch_KLargerThanGraph(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 5; i++ {
-		if err := g.Insert(i, randomVec(4)); err != nil {
+		if err := g.Insert(i, [16]byte{}, randomVec(4)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -220,7 +220,7 @@ func TestRecall_10K_128dim(t *testing.T) {
 	vecs := make([][]float32, n)
 	for i := 0; i < n; i++ {
 		vecs[i] = randomVec(dim)
-		if err := g.Insert(uint64(i), vecs[i]); err != nil {
+		if err := g.Insert(uint64(i), [16]byte{}, vecs[i]); err != nil {
 			t.Fatalf("Insert(%d): %v", i, err)
 		}
 	}
@@ -283,7 +283,7 @@ func BenchmarkSearch_1K_128dim(b *testing.B) {
 	)
 	g, _ := New(DefaultOptions(dim))
 	for i := 0; i < n; i++ {
-		g.Insert(uint64(i), randomVecBench(dim))
+		g.Insert(uint64(i), [16]byte{}, randomVecBench(dim))
 	}
 	query := randomVecBench(dim)
 	b.ResetTimer()

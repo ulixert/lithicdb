@@ -5,7 +5,7 @@ import "testing"
 func TestCleanup_Empty(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 10; i++ {
-		g.Insert(i, randomVec(4))
+		g.Insert(i, [16]byte{}, randomVec(4))
 	}
 	if n := g.Cleanup(); n != 0 {
 		t.Errorf("Cleanup with no tombstones removed %d nodes", n)
@@ -15,7 +15,7 @@ func TestCleanup_Empty(t *testing.T) {
 func TestCleanup_RemovesNodes(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 20; i++ {
-		g.Insert(i, randomVec(4))
+		g.Insert(i, [16]byte{}, randomVec(4))
 	}
 	for i := uint64(0); i < 5; i++ {
 		g.MarkDeleted(i)
@@ -39,7 +39,7 @@ func TestCleanup_RemovesNodes(t *testing.T) {
 func TestCleanup_NeighborListsScrubbed(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 50; i++ {
-		g.Insert(i, randomVec(4))
+		g.Insert(i, [16]byte{}, randomVec(4))
 	}
 	// Tombstone and clean up.
 	for i := uint64(10); i < 20; i++ {
@@ -68,7 +68,7 @@ func TestCleanup_NeighborListsScrubbed(t *testing.T) {
 func TestCleanup_EntryPointUpdated(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 50; i++ {
-		g.Insert(i, randomVec(4))
+		g.Insert(i, [16]byte{}, randomVec(4))
 	}
 
 	g.mu.RLock()
@@ -88,7 +88,7 @@ func TestCleanup_EntryPointUpdated(t *testing.T) {
 func TestCleanup_AllDeleted(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 10; i++ {
-		g.Insert(i, randomVec(4))
+		g.Insert(i, [16]byte{}, randomVec(4))
 	}
 	for i := uint64(0); i < 10; i++ {
 		g.MarkDeleted(i)
@@ -105,7 +105,7 @@ func TestCleanup_AllDeleted(t *testing.T) {
 func TestCleanup_SearchAfterCleanup(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 50; i++ {
-		g.Insert(i, randomVec(4))
+		g.Insert(i, [16]byte{}, randomVec(4))
 	}
 	for i := uint64(0); i < 10; i++ {
 		g.MarkDeleted(i)
@@ -130,7 +130,7 @@ func TestCleanup_SearchAfterCleanup(t *testing.T) {
 func TestCleanup_MemoryDecreases(t *testing.T) {
 	g := testGraph(t, 128)
 	for i := uint64(0); i < 100; i++ {
-		g.Insert(i, randomVec(128))
+		g.Insert(i, [16]byte{}, randomVec(128))
 	}
 	before := g.Stats().MemoryBytes
 	for i := uint64(0); i < 50; i++ {

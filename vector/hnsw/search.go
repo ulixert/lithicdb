@@ -13,8 +13,9 @@ type SearchOptions struct {
 
 // SearchResult is a single vector result with its distance to the query.
 type SearchResult struct {
-	ID       uint64
-	Distance float32
+	ID         uint64
+	ExternalID [16]byte
+	Distance   float32
 }
 
 // Search finds the k nearest neighbors of the query in the graph.
@@ -60,7 +61,11 @@ func (g *Graph) Search(query []float32, k int, sopts *SearchOptions) ([]SearchRe
 
 	results := make([]SearchResult, len(candidates))
 	for i, c := range candidates {
-		results[i] = SearchResult{ID: c.id, Distance: c.dist}
+		results[i] = SearchResult{
+			ID:         c.id,
+			ExternalID: g.nodes[c.id].ExternalID,
+			Distance:   c.dist,
+		}
 	}
 	return results, nil
 }

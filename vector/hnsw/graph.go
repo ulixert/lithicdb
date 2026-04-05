@@ -42,10 +42,11 @@ func DefaultOptions(dim int) Options {
 
 // Node is a single vector in the HNSW graph.
 type Node struct {
-	ID        uint64
-	Vector    []float32
-	Level     int
-	Neighbors [][]uint64 // neighbors[layer] = neighbor IDs at that layer
+	ID         uint64
+	ExternalID [16]byte // caller-managed opaque ID, copied to SearchResult
+	Vector     []float32
+	Level      int
+	Neighbors  [][]uint64 // neighbors[layer] = neighbor IDs at that layer
 }
 
 // Stats report the current state of the graph.
@@ -153,10 +154,12 @@ func (g *Graph) randomLevel() int {
 	return int(math.Floor(-math.Log(rand.Float64()) * g.mL))
 }
 
-// Insert adds a vector to the graph. Returns ErrDuplicateID if the id
-// already exists, ErrDimensionMismatch if the vector length is wrong,
-// or ErrMemoryLimitExceeded if the soft memory cap would be exceeded.
-func (g *Graph) Insert(id uint64, vec []float32) error {
+// Insert adds a vector to the graph. The externalID is an opaque
+// caller-managed identifier stored on the node and copied to SearchResult.
+// Returns ErrDuplicateID if the id already exists, ErrDimensionMismatch
+// if the vector length is wrong, or ErrMemoryLimitExceeded if the soft
+// memory cap would be exceeded.
+func (g *Graph) Insert(id uint64, externalID [16]byte, vec []float32) error {
 	if len(vec) != g.opts.Dim {
 		return ErrDimensionMismatch
 	}
@@ -175,10 +178,11 @@ func (g *Graph) Insert(id uint64, vec []float32) error {
 	}
 
 	node := &Node{
-		ID:        id,
-		Vector:    make([]float32, len(vec)),
-		Level:     level,
-		Neighbors: make([][]uint64, level+1),
+		ID:         id,
+		ExternalID: externalID,
+		Vector:     make([]float32, len(vec)),
+		Level:      level,
+		Neighbors:  make([][]uint64, level+1),
 	}
 	copy(node.Vector, vec)
 	for l := 0; l <= level; l++ {

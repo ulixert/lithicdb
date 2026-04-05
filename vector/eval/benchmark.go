@@ -68,7 +68,7 @@ func RunBenchmark(params BenchmarkParams, baseVecs, queryVecs *Vectors, dist hns
 
 	start := time.Now()
 	for i := 0; i < baseVecs.N; i++ {
-		if err := g.Insert(uint64(i), baseVecs.Vec(i)); err != nil {
+		if err := g.Insert(uint64(i), [16]byte{}, baseVecs.Vec(i)); err != nil {
 			return nil, fmt.Errorf("insert %d: %w", i, err)
 		}
 	}
