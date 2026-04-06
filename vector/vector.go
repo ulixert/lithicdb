@@ -199,6 +199,36 @@ func (vs *VectorStore) Put(collection string, id [16]byte, vec []float32, meta M
 	return nil
 }
 
+// Delete removes a vector from the given collection. Idempotent.
+func (vs *VectorStore) Delete(collection string, id [16]byte) error {
+	vs.mu.RLock()
+	col, ok := vs.collections[collection]
+	vs.mu.RUnlock()
+	if !ok {
+		return ErrCollectionNotFound
+	}
+
+	col.mu.Lock()
+	defer col.mu.Unlock()
+
+	hnswID, exists := col.ids[id]
+	if !exists {
+		return nil // idempotent
+	}
+
+	// KV delete first. If this fails, HNSW is untouched.
+	vectorKey := makeVectorKey(collection, id)
+	if err := vs.db.Delete(vectorKey); err != nil {
+		return fmt.Errorf("vector: KV delete: %w", err)
+	}
+
+	col.graph.MarkDeleted(hnswID)
+	delete(col.ids, id)
+
+	vs.metrics.Counter("vector.delete", 1, map[string]string{"collection": collection})
+	return nil
+}
+
 // loadCollections rebuilds all HNSW graphs from durable KV data.
 // Called once during NewVectorStore. Config keys (kindConfig) sort before
 // vector keys (kindVector) for the same collection, so a collection's
