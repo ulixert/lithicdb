@@ -1,9 +1,11 @@
 package vector
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/ulixert/theseon/db"
@@ -226,6 +228,74 @@ func (vs *VectorStore) Delete(collection string, id [16]byte) error {
 	delete(col.ids, id)
 
 	vs.metrics.Counter("vector.delete", 1, map[string]string{"collection": collection})
+	return nil
+}
+
+// Search finds the k nearest neighbors of the query vector.
+func (vs *VectorStore) Search(collection string, query []float32, k int, opts *SearchOptions) ([]Result, error) {
+	vs.mu.RLock()
+	col, ok := vs.collections[collection]
+	vs.mu.RUnlock()
+	if !ok {
+		return nil, ErrCollectionNotFound
+	}
+
+	// 2x oversample to account for stale candidates.
+	ef := k * 2
+	if opts != nil && opts.EfSearch > 0 {
+		ef = opts.EfSearch
+	}
+
+	candidates, err := col.graph.Search(query, ef, &hnsw.SearchOptions{EfSearch: ef})
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify each candidate against KV (source of truth).
+	results := make([]Result, 0, k)
+	for _, c := range candidates {
+		vectorKey := makeVectorKey(collection, c.ExternalID)
+		val, found := vs.db.Get(vectorKey)
+		if !found || val.Tombstone {
+			continue // stale candidate
+		}
+
+		vec, meta, err := DecodeVector(val.Data)
+		if err != nil {
+			vs.logger.Error("failed to decode vector from KV",
+				"collection", collection,
+				"id", c.ExternalID,
+				"error", err,
+			)
+			continue
+		}
+
+		results = append(results, Result{
+			ID:       c.ExternalID,
+			Vector:   vec,
+			Metadata: meta,
+			Distance: c.Distance,
+		})
+	}
+
+	slices.SortFunc(results, func(a, b Result) int {
+		return cmp.Compare(a.Distance, b.Distance)
+	})
+
+	if len(results) > k {
+		results = results[:k]
+	}
+
+	vs.metrics.Histogram("vector.search.results", float64(len(results)), map[string]string{"collection": collection})
+	return results, nil
+}
+
+// Close releases in-memory resources. It does NOT close the underlying db.DB.
+// The caller owns the DB lifecycle.
+func (vs *VectorStore) Close() error {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	vs.collections = nil
 	return nil
 }
 
