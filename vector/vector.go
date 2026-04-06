@@ -91,6 +91,114 @@ func NewVectorStore(database *db.DB, cfg VectorStoreConfig, opts ...VectorStoreO
 	return vs, nil
 }
 
+// CreateCollection registers a new vector collection.
+func (vs *VectorStore) CreateCollection(name string, cfg CollectionConfig) error {
+	distFn, err := metricToDistanceFunc(cfg.Metric)
+	if err != nil {
+		return err
+	}
+
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+
+	if _, ok := vs.collections[name]; ok {
+		return ErrCollectionExists
+	}
+
+	graph, err := hnsw.New(hnsw.Options{
+		M:           cfg.M,
+		EfConstruct: cfg.EfConstruct,
+		EfSearch:    cfg.EfSearch,
+		Dim:         cfg.Dim,
+		Dist:        distFn,
+		Logger:      vs.logger,
+	})
+	if err != nil {
+		return fmt.Errorf("vector: create graph: %w", err)
+	}
+
+	// Persist config to KV.
+	configKey := makeCollectionConfigKey(name)
+	configVal := encodeCollectionConfig(cfg)
+	if err := vs.db.Put(configKey, configVal); err != nil {
+		return fmt.Errorf("vector: persist config: %w", err)
+	}
+
+	vs.collections[name] = &collectionState{
+		graph:  graph,
+		config: cfg,
+		ids:    make(map[[16]byte]uint64),
+	}
+
+	vs.metrics.Counter("vector.collection.created", 1, map[string]string{"collection": name})
+	return nil
+}
+
+// Put inserts or updates a vector in the given collection.
+func (vs *VectorStore) Put(collection string, id [16]byte, vec []float32, meta Metadata) error {
+	vs.mu.RLock()
+	col, ok := vs.collections[collection]
+	vs.mu.RUnlock()
+	if !ok {
+		return ErrCollectionNotFound
+	}
+
+	if len(vec) != col.config.Dim {
+		return hnsw.ErrDimensionMismatch
+	}
+
+	encoded, err := EncodeVector(vec, meta)
+	if err != nil {
+		return err
+	}
+
+	vectorKey := makeVectorKey(collection, id)
+
+	col.mu.Lock()
+	defer col.mu.Unlock()
+
+	// Check MaxVectors limit (only for new inserts, not updates).
+	_, isUpdate := col.ids[id]
+	if !isUpdate && col.config.MaxVectors > 0 && int64(len(col.ids)) >= col.config.MaxVectors {
+		return fmt.Errorf("vector: collection %q reached max vectors limit (%d)", collection, col.config.MaxVectors)
+	}
+
+	// Persist to KV first.
+	if err := vs.db.Put(vectorKey, encoded); err != nil {
+		return fmt.Errorf("vector: KV put: %w", err)
+	}
+
+	// Update HNSW index.
+	// Insert the new node BEFORE tombstoning the old one. This ensures the
+	// new node can connect to the old (still-live) node during insertion.
+	// If we tombstoned first, the insert's neighbor search would find no
+	// live candidates and the new node would be isolated.
+	newID := col.nextID
+	col.nextID++
+
+	if err := col.graph.Insert(newID, id, vec); err != nil {
+		// KV has the vector, but HNSW doesn't. On restart, loadCollections
+		// will rebuild the graph and index this vector. If this was an update,
+		// the old node is still live in HNSW (we haven't tombstoned it yet),
+		// so Search will find the old node but KV verification will return
+		// the new vector.
+		vs.logger.Error("HNSW insert failed after KV write",
+			"collection", collection,
+			"error", err,
+		)
+		return fmt.Errorf("%w: %v", ErrIndexingFailed, err)
+	}
+
+	if isUpdate {
+		col.graph.MarkDeleted(col.ids[id])
+	}
+
+	col.ids[id] = newID
+
+	vs.metrics.Counter("vector.put", 1, map[string]string{"collection": collection})
+	return nil
+}
+
 // loadCollections rebuilds all HNSW graphs from durable KV data.
 // Called once during NewVectorStore. Config keys (kindConfig) sort before
 // vector keys (kindVector) for the same collection, so a collection's
