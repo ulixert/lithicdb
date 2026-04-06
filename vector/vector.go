@@ -1,11 +1,9 @@
 package vector
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 
 	"github.com/ulixert/theseon/db"
@@ -276,14 +274,10 @@ func (vs *VectorStore) Search(collection string, query []float32, k int, opts *S
 			Metadata: meta,
 			Distance: c.Distance,
 		})
-	}
 
-	slices.SortFunc(results, func(a, b Result) int {
-		return cmp.Compare(a.Distance, b.Distance)
-	})
-
-	if len(results) > k {
-		results = results[:k]
+		if len(results) == k {
+			break // candidates are pre-sorted by distance; remaining are farther
+		}
 	}
 
 	vs.metrics.Histogram("vector.search.results", float64(len(results)), map[string]string{"collection": collection})
