@@ -37,7 +37,7 @@ func TestNew_InvalidOptions(t *testing.T) {
 
 func TestInsert_FirstNode(t *testing.T) {
 	g := testGraph(t, 4)
-	if err := g.Insert(1, []float32{1, 2, 3, 4}); err != nil {
+	if err := g.Insert(1, [16]byte{}, []float32{1, 2, 3, 4}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
 	if g.Len() != 1 {
@@ -47,7 +47,7 @@ func TestInsert_FirstNode(t *testing.T) {
 
 func TestInsert_DimensionMismatch(t *testing.T) {
 	g := testGraph(t, 4)
-	err := g.Insert(1, []float32{1, 2, 3}) // wrong dim
+	err := g.Insert(1, [16]byte{}, []float32{1, 2, 3}) // wrong dim
 	if err != ErrDimensionMismatch {
 		t.Errorf("got %v, want ErrDimensionMismatch", err)
 	}
@@ -55,10 +55,10 @@ func TestInsert_DimensionMismatch(t *testing.T) {
 
 func TestInsert_DuplicateID(t *testing.T) {
 	g := testGraph(t, 4)
-	if err := g.Insert(1, []float32{1, 2, 3, 4}); err != nil {
+	if err := g.Insert(1, [16]byte{}, []float32{1, 2, 3, 4}); err != nil {
 		t.Fatal(err)
 	}
-	err := g.Insert(1, []float32{5, 6, 7, 8})
+	err := g.Insert(1, [16]byte{}, []float32{5, 6, 7, 8})
 	if err != ErrDuplicateID {
 		t.Errorf("got %v, want ErrDuplicateID", err)
 	}
@@ -73,7 +73,7 @@ func TestInsert_MemoryLimit(t *testing.T) {
 	}
 	// First insert may succeed if the estimate allows it, but eventually it should fail.
 	for i := uint64(0); i < 1000; i++ {
-		err = g.Insert(i, randomVec(4))
+		err = g.Insert(i, [16]byte{}, randomVec(4))
 		if err == ErrMemoryLimitExceeded {
 			return // success
 		}
@@ -87,7 +87,7 @@ func TestInsert_MemoryLimit(t *testing.T) {
 func TestInsert_MultipleNodes(t *testing.T) {
 	g := testGraph(t, 32)
 	for i := uint64(0); i < 100; i++ {
-		if err := g.Insert(i, randomVec(32)); err != nil {
+		if err := g.Insert(i, [16]byte{}, randomVec(32)); err != nil {
 			t.Fatalf("Insert(%d): %v", i, err)
 		}
 	}
@@ -99,7 +99,7 @@ func TestInsert_MultipleNodes(t *testing.T) {
 func TestMarkDeleted(t *testing.T) {
 	g := testGraph(t, 4)
 	for i := uint64(0); i < 10; i++ {
-		if err := g.Insert(i, randomVec(4)); err != nil {
+		if err := g.Insert(i, [16]byte{}, randomVec(4)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -120,7 +120,7 @@ func TestMarkDeleted(t *testing.T) {
 func TestStats_MemoryTracking(t *testing.T) {
 	g := testGraph(t, 128)
 	for i := uint64(0); i < 50; i++ {
-		if err := g.Insert(i, randomVec(128)); err != nil {
+		if err := g.Insert(i, [16]byte{}, randomVec(128)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -136,7 +136,7 @@ func TestLevelDistribution(t *testing.T) {
 	g := testGraph(t, 4)
 	levels := make(map[int]int)
 	for i := uint64(0); i < 10000; i++ {
-		if err := g.Insert(i, randomVec(4)); err != nil {
+		if err := g.Insert(i, [16]byte{}, randomVec(4)); err != nil {
 			t.Fatal(err)
 		}
 	}
