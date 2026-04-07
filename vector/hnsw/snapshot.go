@@ -153,3 +153,164 @@ func nodeByteSize(dim int, node *Node) int {
 	}
 	return size
 }
+
+// ReadSnapshot deserializes a snapshot from r. It validates the magic,
+// version, and CRC32 checksum. Returns ErrCorruptSnapshot if the
+// checksum doesn't match, ErrInvalidSnapshot for structural errors.
+func ReadSnapshot(r io.ReaderAt, size int64) (*SnapshotData, error) {
+	if size < int64(footerSize) {
+		return nil, fmt.Errorf("%w: file too small (%d bytes)", ErrInvalidSnapshot, size)
+	}
+
+	// Read footer.
+	var ftrBuf [footerSize]byte
+	if _, err := r.ReadAt(ftrBuf[:], size-int64(footerSize)); err != nil {
+		return nil, fmt.Errorf("%w: read footer: %v", ErrInvalidSnapshot, err)
+	}
+	ftr := decodeSnapshotFooter(ftrBuf[:])
+
+	if ftr.magic != snapshotMagic {
+		return nil, fmt.Errorf("%w: bad magic 0x%08X", ErrInvalidSnapshot, ftr.magic)
+	}
+	if ftr.version != snapshotVersion {
+		return nil, fmt.Errorf("%w: version %d", ErrSnapshotVersion, ftr.version)
+	}
+
+	// Validate footer consistency.
+	expectedSize := int64(ftr.headerOffset) + int64(ftr.headerLen) + int64(footerSize)
+	if expectedSize != size {
+		return nil, fmt.Errorf("%w: size mismatch (expected %d, got %d)", ErrInvalidSnapshot, expectedSize, size)
+	}
+
+	// Read all data covered by CRC (nodes + header).
+	crcLen := int64(ftr.headerOffset) + int64(ftr.headerLen)
+	data := make([]byte, crcLen)
+	if _, err := r.ReadAt(data, 0); err != nil {
+		return nil, fmt.Errorf("%w: read data: %v", ErrInvalidSnapshot, err)
+	}
+
+	// Validate CRC.
+	if crc32.ChecksumIEEE(data) != ftr.crc32Val {
+		return nil, ErrCorruptSnapshot
+	}
+
+	// Parse header.
+	if int64(ftr.headerLen) < headerFixedSize {
+		return nil, fmt.Errorf("%w: header too small", ErrInvalidSnapshot)
+	}
+	hdr := decodeSnapshotHeader(data[ftr.headerOffset:])
+
+	// Parse nodes.
+	dim := int(hdr.dim)
+	nodes := make([]*Node, 0, hdr.numNodes)
+	offset := 0
+	nodeData := data[:ftr.headerOffset]
+
+	for i := uint64(0); i < hdr.numNodes; i++ {
+		node, n, err := readNode(nodeData[offset:], dim)
+		if err != nil {
+			return nil, fmt.Errorf("%w: node %d: %v", ErrInvalidSnapshot, i, err)
+		}
+		nodes = append(nodes, node)
+		offset += n
+	}
+
+	if offset != int(ftr.headerOffset) {
+		return nil, fmt.Errorf("%w: node data size mismatch (read %d, expected %d)", ErrInvalidSnapshot, offset, ftr.headerOffset)
+	}
+
+	return &SnapshotData{
+		Nodes:      nodes,
+		EntryPoint: hdr.entryPoint,
+		MaxLevel:   int(hdr.maxLevel),
+		M:          int(hdr.m),
+		Dim:        dim,
+		Metric:     hdr.metric,
+		Seq:        hdr.seq,
+	}, nil
+}
+
+// readNode deserializes a single node from buf. Returns the node and
+// the number of bytes consumed.
+func readNode(buf []byte, dim int) (*Node, int, error) {
+	// Minimum: id(8) + externalID(16) + level(1) + dim(2) + vector(dim*4)
+	minSize := 8 + 16 + 1 + 2 + dim*4
+	if len(buf) < minSize {
+		return nil, 0, fmt.Errorf("truncated node (need %d, have %d)", minSize, len(buf))
+	}
+
+	off := 0
+
+	id := binary.LittleEndian.Uint64(buf[off:])
+	off += 8
+
+	var externalID [16]byte
+	copy(externalID[:], buf[off:off+16])
+	off += 16
+
+	level := int(buf[off])
+	off++
+
+	nodeDim := int(binary.LittleEndian.Uint16(buf[off:]))
+	off += 2
+	if nodeDim != dim {
+		return nil, 0, fmt.Errorf("dim mismatch (node %d, header %d)", nodeDim, dim)
+	}
+
+	vec := make([]float32, dim)
+	for j := 0; j < dim; j++ {
+		vec[j] = math.Float32frombits(binary.LittleEndian.Uint32(buf[off:]))
+		off += 4
+	}
+
+	numLayers := level + 1
+	neighbors := make([][]uint64, numLayers)
+	for l := 0; l < numLayers; l++ {
+		if off+2 > len(buf) {
+			return nil, 0, fmt.Errorf("truncated neighbor count at layer %d", l)
+		}
+		count := int(binary.LittleEndian.Uint16(buf[off:]))
+		off += 2
+		if off+count*8 > len(buf) {
+			return nil, 0, fmt.Errorf("truncated neighbors at layer %d", l)
+		}
+		nbs := make([]uint64, count)
+		for k := 0; k < count; k++ {
+			nbs[k] = binary.LittleEndian.Uint64(buf[off:])
+			off += 8
+		}
+		neighbors[l] = nbs
+	}
+
+	return &Node{
+		ID:         id,
+		ExternalID: externalID,
+		Vector:     vec,
+		Level:      level,
+		Neighbors:  neighbors,
+	}, off, nil
+}
+
+// RestoreFromSnapshot populates the graph from deserialized snapshot data.
+// Must be called before the graph is shared (no lock acquired). Validates
+// that dim and M match the graph's options.
+func (g *Graph) RestoreFromSnapshot(data *SnapshotData) error {
+	if data.Dim != g.opts.Dim {
+		return fmt.Errorf("hnsw: snapshot dim %d != graph dim %d", data.Dim, g.opts.Dim)
+	}
+	if data.M != g.opts.M {
+		return fmt.Errorf("hnsw: snapshot M %d != graph M %d", data.M, g.opts.M)
+	}
+
+	g.nodes = make(map[uint64]*Node, len(data.Nodes))
+	g.memoryBytes = 0
+	for _, node := range data.Nodes {
+		g.nodes[node.ID] = node
+		g.memoryBytes += g.estimateNodeMemory(node.Level)
+	}
+	g.entryPoint = data.EntryPoint
+	g.maxLevel = data.MaxLevel
+	g.tombstones = make(map[uint64]bool)
+
+	return nil
+}
