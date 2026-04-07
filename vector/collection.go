@@ -118,6 +118,30 @@ func parseVectorKey(userKey []byte) (collection string, id [16]byte, kind byte, 
 	return collection, id, kind, nil
 }
 
+// makeVectorKeyPrefix returns the key prefix for all vector entries in a
+// collection (excluding config keys). Used as the start bound for ScanRange.
+// Format: [keyPrefixVector][name_len:2 LE][name][kindVector]
+func makeVectorKeyPrefix(collection string) []byte {
+	buf := make([]byte, 0, 1+2+len(collection)+1)
+	buf = append(buf, keyPrefixVector)
+	buf = binary.LittleEndian.AppendUint16(buf, uint16(len(collection)))
+	buf = append(buf, collection...)
+	buf = append(buf, kindVector)
+	return buf
+}
+
+// makeVectorKeyPrefixEnd returns the exclusive end bound for scanning
+// all vector entries in a collection.
+// Format: [keyPrefixVector][name_len:2 LE][name][kindVector+1]
+func makeVectorKeyPrefixEnd(collection string) []byte {
+	buf := make([]byte, 0, 1+2+len(collection)+1)
+	buf = append(buf, keyPrefixVector)
+	buf = binary.LittleEndian.AppendUint16(buf, uint16(len(collection)))
+	buf = append(buf, collection...)
+	buf = append(buf, kindVector+1)
+	return buf
+}
+
 // metricToDistanceFunc maps a stored metric identifier to an HNSW distance function.
 func metricToDistanceFunc(metric uint8) (hnsw.DistanceFunc, error) {
 	switch metric {

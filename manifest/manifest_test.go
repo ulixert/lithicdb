@@ -435,3 +435,180 @@ func TestEncoding_UnknownType(t *testing.T) {
 		t.Fatal("expected error for unknown record type")
 	}
 }
+
+func TestEncoding_HNSWSnapshot(t *testing.T) {
+	rec := Record{
+		Type:           typeHNSWSnapshot,
+		HNSWCollection: "my-vectors",
+		HNSWSeq:        42,
+		HNSWFilename:   "my-vectors.hnsw.42.snap",
+	}
+
+	data, err := encodeRecord(rec)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, n, err := decodeRecord(data)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if n != len(data) {
+		t.Errorf("consumed %d bytes, want %d", n, len(data))
+	}
+	if decoded.HNSWCollection != "my-vectors" {
+		t.Errorf("collection = %q, want %q", decoded.HNSWCollection, "my-vectors")
+	}
+	if decoded.HNSWSeq != 42 {
+		t.Errorf("seq = %d, want 42", decoded.HNSWSeq)
+	}
+	if decoded.HNSWFilename != "my-vectors.hnsw.42.snap" {
+		t.Errorf("filename = %q, want %q", decoded.HNSWFilename, "my-vectors.hnsw.42.snap")
+	}
+}
+
+func TestManifest_AddHNSWSnapshot(t *testing.T) {
+	dir := t.TempDir()
+
+	m, err := Create(dir, 1, 1)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := m.AddHNSWSnapshot("embeddings", 100, "embeddings.hnsw.100.snap"); err != nil {
+		t.Fatalf("AddHNSWSnapshot: %v", err)
+	}
+	m.Close()
+
+	m2, state, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer m2.Close()
+
+	snap, ok := state.HNSWSnapshots["embeddings"]
+	if !ok {
+		t.Fatal("expected HNSW snapshot for 'embeddings'")
+	}
+	if snap.Seq != 100 {
+		t.Errorf("seq = %d, want 100", snap.Seq)
+	}
+	if snap.Filename != "embeddings.hnsw.100.snap" {
+		t.Errorf("filename = %q, want %q", snap.Filename, "embeddings.hnsw.100.snap")
+	}
+}
+
+func TestManifest_HNSWSnapshotLatestWins(t *testing.T) {
+	dir := t.TempDir()
+
+	m, err := Create(dir, 1, 1)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	m.AddHNSWSnapshot("col", 50, "col.hnsw.50.snap")
+	m.AddHNSWSnapshot("col", 200, "col.hnsw.200.snap")
+	m.Close()
+
+	m2, state, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer m2.Close()
+
+	snap := state.HNSWSnapshots["col"]
+	if snap.Seq != 200 {
+		t.Errorf("seq = %d, want 200 (latest should win)", snap.Seq)
+	}
+	if snap.Filename != "col.hnsw.200.snap" {
+		t.Errorf("filename = %q, want %q", snap.Filename, "col.hnsw.200.snap")
+	}
+}
+
+func TestManifest_HNSWSnapshotMultipleCollections(t *testing.T) {
+	dir := t.TempDir()
+
+	m, err := Create(dir, 1, 1)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	m.AddHNSWSnapshot("alpha", 10, "alpha.hnsw.10.snap")
+	m.AddHNSWSnapshot("beta", 20, "beta.hnsw.20.snap")
+	m.Close()
+
+	m2, state, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer m2.Close()
+
+	if len(state.HNSWSnapshots) != 2 {
+		t.Fatalf("snapshot count = %d, want 2", len(state.HNSWSnapshots))
+	}
+	if state.HNSWSnapshots["alpha"].Seq != 10 {
+		t.Errorf("alpha seq = %d, want 10", state.HNSWSnapshots["alpha"].Seq)
+	}
+	if state.HNSWSnapshots["beta"].Seq != 20 {
+		t.Errorf("beta seq = %d, want 20", state.HNSWSnapshots["beta"].Seq)
+	}
+}
+
+func TestManifest_HNSWSnapshotSurvivesType3Snapshot(t *testing.T) {
+	dir := t.TempDir()
+
+	m, err := Create(dir, 1, 1)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Add an HNSW snapshot.
+	m.AddHNSWSnapshot("vectors", 100, "vectors.hnsw.100.snap")
+
+	// Write enough SSTable records to trigger a type 3 snapshot (64 records).
+	for i := uint64(1); i <= 100; i++ {
+		m.AddSSTable(SSTableInfo{
+			ID: i, Level: 0,
+			FirstKey: []byte("a"), LastKey: []byte("z"),
+		})
+	}
+
+	m.Close()
+
+	// Reopen — HNSW state should survive the type 3 snapshot.
+	m2, state, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer m2.Close()
+
+	snap, ok := state.HNSWSnapshots["vectors"]
+	if !ok {
+		t.Fatal("HNSW snapshot lost after type 3 manifest snapshot")
+	}
+	if snap.Seq != 100 || snap.Filename != "vectors.hnsw.100.snap" {
+		t.Errorf("HNSW snapshot = %+v, want seq=100 filename=vectors.hnsw.100.snap", snap)
+	}
+}
+
+func TestManifest_HNSWSnapshotEmptyByDefault(t *testing.T) {
+	dir := t.TempDir()
+
+	m, err := Create(dir, 1, 1)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	m.Close()
+
+	m2, state, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer m2.Close()
+
+	if state.HNSWSnapshots == nil {
+		t.Fatal("HNSWSnapshots should be non-nil (empty map)")
+	}
+	if len(state.HNSWSnapshots) != 0 {
+		t.Errorf("snapshot count = %d, want 0", len(state.HNSWSnapshots))
+	}
+}

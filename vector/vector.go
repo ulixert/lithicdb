@@ -1,9 +1,12 @@
 package vector
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/ulixert/theseon/db"
@@ -48,6 +51,22 @@ func WithLogger(l *slog.Logger) VectorStoreOption {
 	}
 }
 
+// WithSnapshots provides HNSW snapshot info for snapshot-based recovery.
+// If a collection has a snapshot, it will be loaded from the disk instead
+// of doing a full graph rebuild from KV.
+func WithSnapshots(snapshots map[string]SnapshotInfo) VectorStoreOption {
+	return func(vs *VectorStore) {
+		vs.snapshots = snapshots
+	}
+}
+
+// SnapshotInfo describes a persisted HNSW graph snapshot file.
+type SnapshotInfo struct {
+	Collection string
+	Seq        uint64
+	Filename   string
+}
+
 // SearchOptions configures a single search query.
 type SearchOptions struct {
 	EfSearch int // 0 => use 2*k
@@ -70,6 +89,7 @@ type VectorStore struct {
 	metrics     Metrics
 	mu          sync.RWMutex // protects the collections map
 	logger      *slog.Logger
+	snapshots   map[string]SnapshotInfo // optional, for snapshot-based recovery
 }
 
 // NewVectorStore creates a VectorStore backed by the given db.DB.
@@ -293,11 +313,60 @@ func (vs *VectorStore) Close() error {
 	return nil
 }
 
-// loadCollections rebuilds all HNSW graphs from durable KV data.
-// Called once during NewVectorStore. Config keys (kindConfig) sort before
-// vector keys (kindVector) for the same collection, so a collection's
-// config is always seen before its vectors.
+// loadCollections recovers all HNSW graphs from a durable state.
+// For collections with a snapshot, it restores from the snapshot then
+// reconciles with KV. For others, it does a full rebuild from KV.
 func (vs *VectorStore) loadCollections() error {
+	if err := vs.loadCollectionConfigs(); err != nil {
+		return err
+	}
+
+	for name, col := range vs.collections {
+		snap, hasSnap := vs.snapshots[name]
+		if hasSnap {
+			if err := vs.loadFromSnapshot(name, col, snap); err != nil {
+				vs.logger.Warn("snapshot recovery failed, falling back to full rebuild",
+					"collection", name,
+					"error", err,
+				)
+				// Reset state and fall back to full rebuild.
+				col.ids = make(map[[16]byte]uint64)
+				col.nextID = 0
+				graph, err := hnsw.New(hnsw.Options{
+					M:           col.config.M,
+					EfConstruct: col.config.EfConstruct,
+					EfSearch:    col.config.EfSearch,
+					Dim:         col.config.Dim,
+					Dist:        mustDistanceFunc(col.config.Metric),
+					Logger:      vs.logger,
+				})
+				if err != nil {
+					return fmt.Errorf("vector: recreate graph for %q: %w", name, err)
+				}
+				col.graph = graph
+				if err := vs.fullRebuild(name, col); err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := vs.fullRebuild(name, col); err != nil {
+				return err
+			}
+		}
+
+		vs.logger.Info("loaded collection",
+			"collection", name,
+			"vectors", len(col.ids),
+			"dim", col.config.Dim,
+		)
+	}
+
+	return nil
+}
+
+// loadCollectionConfigs scans the KV vector namespace for config keys
+// and creates an empty collectionState for each.
+func (vs *VectorStore) loadCollectionConfigs() error {
 	start := []byte{keyPrefixVector}
 	end := []byte{keyPrefixVector + 1}
 	iter := vs.db.ScanRange(start, end)
@@ -313,15 +382,14 @@ func (vs *VectorStore) loadCollections() error {
 			continue
 		}
 
-		colName, uuid, kind, err := parseVectorKey(userKey)
+		colName, _, kind, err := parseVectorKey(userKey)
 		if err != nil {
 			vs.logger.Warn("skipping unparseable vector key", "error", err)
 			iter.Next()
 			continue
 		}
 
-		switch kind {
-		case kindConfig:
+		if kind == kindConfig {
 			cfg, err := decodeCollectionConfig(value)
 			if err != nil {
 				vs.logger.Error("failed to decode collection config", "collection", colName, "error", err)
@@ -353,53 +421,320 @@ func (vs *VectorStore) loadCollections() error {
 				config: cfg,
 				ids:    make(map[[16]byte]uint64),
 			}
-
-		case kindVector:
-			col, ok := vs.collections[colName]
-			if !ok {
-				vs.logger.Warn("vector key for unknown collection, skipping",
-					"collection", colName)
-				iter.Next()
-				continue
-			}
-
-			vec, _, err := DecodeVector(value)
-			if err != nil {
-				vs.logger.Error("failed to decode vector during recovery",
-					"collection", colName,
-					"error", err,
-				)
-				iter.Next()
-				continue
-			}
-
-			id := col.nextID
-			col.nextID++
-			if err := col.graph.Insert(id, uuid, vec); err != nil {
-				vs.logger.Error("failed to insert vector during recovery",
-					"collection", colName,
-					"error", err,
-				)
-				iter.Next()
-				continue
-			}
-			col.ids[uuid] = id
 		}
 
 		iter.Next()
 	}
 
-	if err := iter.Err(); err != nil {
-		return fmt.Errorf("vector: scan error: %w", err)
+	return iter.Err()
+}
+
+// fullRebuild rebuilds one collection's HNSW graph from KV vector entries.
+func (vs *VectorStore) fullRebuild(name string, col *collectionState) error {
+	start := makeVectorKeyPrefix(name)
+	end := makeVectorKeyPrefixEnd(name)
+	iter := vs.db.ScanRange(start, end)
+	defer iter.Close()
+
+	for iter.IsValid() {
+		userKey := kv.UserKey(iter.Key())
+		value := iter.Value()
+
+		if value == nil {
+			iter.Next()
+			continue
+		}
+
+		_, uuid, _, err := parseVectorKey(userKey)
+		if err != nil {
+			vs.logger.Warn("skipping unparseable vector key", "error", err)
+			iter.Next()
+			continue
+		}
+
+		vec, _, err := DecodeVector(value)
+		if err != nil {
+			vs.logger.Error("failed to decode vector during recovery",
+				"collection", name, "error", err)
+			iter.Next()
+			continue
+		}
+
+		id := col.nextID
+		col.nextID++
+		if err := col.graph.Insert(id, uuid, vec); err != nil {
+			vs.logger.Error("failed to insert vector during recovery",
+				"collection", name, "error", err)
+			iter.Next()
+			continue
+		}
+		col.ids[uuid] = id
+
+		iter.Next()
 	}
 
-	for name, col := range vs.collections {
-		vs.logger.Info("loaded collection",
-			"collection", name,
-			"vectors", len(col.ids),
-			"dim", col.config.Dim,
-		)
+	return iter.Err()
+}
+
+// loadFromSnapshot recovers a collection using a snapshot file, then
+// reconciles with KV for any changes that happened after the snapshot.
+func (vs *VectorStore) loadFromSnapshot(name string, col *collectionState, snap SnapshotInfo) error {
+	snapPath := filepath.Join(vs.db.Dir(), snap.Filename)
+	f, err := os.Open(snapPath)
+	if err != nil {
+		return fmt.Errorf("open snapshot: %w", err)
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat snapshot: %w", err)
+	}
+
+	data, err := hnsw.ReadSnapshot(f, fi.Size())
+	if err != nil {
+		return fmt.Errorf("read snapshot: %w", err)
+	}
+
+	if err := col.graph.RestoreFromSnapshot(data); err != nil {
+		return fmt.Errorf("restore snapshot: %w", err)
+	}
+
+	// Rebuild ids map from restored nodes.
+	for _, node := range data.Nodes {
+		col.ids[node.ExternalID] = node.ID
+		if node.ID >= col.nextID {
+			col.nextID = node.ID + 1
+		}
+	}
+
+	// Reconcile with KV: scan all vector keys for this collection.
+	// SnapshotIterator emits exactly one entry per user key (newest visible).
+	unseen := make(map[[16]byte]struct{}, len(col.ids))
+	for uuid := range col.ids {
+		unseen[uuid] = struct{}{}
+	}
+
+	var inserted, updated, removed int
+	start := makeVectorKeyPrefix(name)
+	end := makeVectorKeyPrefixEnd(name)
+	iter := vs.db.ScanRange(start, end)
+	defer iter.Close()
+
+	for iter.IsValid() {
+		ikey := iter.Key()
+		userKey := kv.UserKey(ikey)
+		seq := kv.SeqNum(ikey)
+		value := iter.Value()
+
+		_, uuid, _, err := parseVectorKey(userKey)
+		if err != nil {
+			vs.logger.Warn("skipping unparseable vector key during reconcile", "error", err)
+			iter.Next()
+			continue
+		}
+
+		delete(unseen, uuid)
+
+		if value == nil {
+			// Tombstone: vector was deleted after snapshot.
+			if oldID, exists := col.ids[uuid]; exists {
+				col.graph.MarkDeleted(oldID)
+				delete(col.ids, uuid)
+				removed++
+			}
+			iter.Next()
+			continue
+		}
+
+		if seq <= snap.Seq {
+			// Entry unchanged since snapshot, skip.
+			iter.Next()
+			continue
+		}
+
+		// Entry is newer than snapshot: either a new insert or an update.
+		vec, _, err := DecodeVector(value)
+		if err != nil {
+			vs.logger.Error("failed to decode vector during reconcile",
+				"collection", name, "error", err)
+			iter.Next()
+			continue
+		}
+
+		if oldID, exists := col.ids[uuid]; exists {
+			// Update: tombstone old node, insert new.
+			col.graph.MarkDeleted(oldID)
+			updated++
+		} else {
+			inserted++
+		}
+
+		newID := col.nextID
+		col.nextID++
+		if err := col.graph.Insert(newID, uuid, vec); err != nil {
+			vs.logger.Error("failed to insert vector during reconcile",
+				"collection", name, "error", err)
+			iter.Next()
+			continue
+		}
+		col.ids[uuid] = newID
+
+		iter.Next()
+	}
+
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("reconcile scan error: %w", err)
+	}
+
+	// Any UUID still in unseen was deleted, AND its tombstone was
+	// compacted away (it doesn't appear in KV at all).
+	for uuid := range unseen {
+		if oldID, exists := col.ids[uuid]; exists {
+			col.graph.MarkDeleted(oldID)
+			delete(col.ids, uuid)
+			removed++
+		}
+	}
+
+	vs.logger.Info("snapshot recovery complete",
+		"collection", name,
+		"restored", len(data.Nodes),
+		"inserted", inserted,
+		"updated", updated,
+		"removed", removed,
+	)
+
+	return nil
+}
+
+// SnapshotAll writes HNSW snapshots for all non-empty collections.
+// Each collection's snapshot seq is captured under that collection's
+// write lock, ensuring it exactly matches the graph state.
+func (vs *VectorStore) SnapshotAll(dir string) ([]SnapshotInfo, error) {
+	vs.mu.RLock()
+	names := make([]string, 0, len(vs.collections))
+	for name := range vs.collections {
+		names = append(names, name)
+	}
+	vs.mu.RUnlock()
+
+	var results []SnapshotInfo
+	for _, name := range names {
+		vs.mu.RLock()
+		col := vs.collections[name]
+		vs.mu.RUnlock()
+		if col == nil || col.graph.Len() == 0 {
+			continue
+		}
+
+		info, err := vs.snapshotCollection(dir, name, col)
+		if err != nil {
+			vs.logger.Error("failed to snapshot collection",
+				"collection", name, "error", err)
+			continue
+		}
+		results = append(results, info)
+	}
+
+	return results, nil
+}
+
+// snapshotCollection writes a single collection's HNSW snapshot to disk.
+func (vs *VectorStore) snapshotCollection(dir, name string, col *collectionState) (SnapshotInfo, error) {
+	// Capture seq under the collection's write lock to ensure it matches
+	// the graph state exactly.
+	col.mu.Lock()
+	seq := vs.db.CurrentSeq()
+	metric := col.config.Metric
+
+	filename := fmt.Sprintf("%s.hnsw.%d.snap", name, seq)
+	tmpPath := filepath.Join(dir, filename+".tmp")
+	finalPath := filepath.Join(dir, filename)
+
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
+		col.mu.Unlock()
+		return SnapshotInfo{}, fmt.Errorf("create temp file: %w", err)
+	}
+
+	bw := bufio.NewWriterSize(f, 4*1024*1024) // 4MB buffer
+	err = col.graph.WriteSnapshot(bw, seq, metric)
+	col.mu.Unlock() // release collection lock; writes to this collection can resume
+
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return SnapshotInfo{}, fmt.Errorf("write snapshot: %w", err)
+	}
+
+	if err := bw.Flush(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return SnapshotInfo{}, fmt.Errorf("flush: %w", err)
+	}
+
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return SnapshotInfo{}, fmt.Errorf("fsync: %w", err)
+	}
+	_ = f.Close()
+
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return SnapshotInfo{}, fmt.Errorf("rename: %w", err)
+	}
+
+	if err := syncDir(dir); err != nil {
+		return SnapshotInfo{}, fmt.Errorf("sync dir: %w", err)
+	}
+
+	return SnapshotInfo{
+		Collection: name,
+		Seq:        seq,
+		Filename:   filename,
+	}, nil
+}
+
+// CleanupSnapshotFiles removes stale snapshot files not in validFiles,
+// and any leftover .snap.tmp files.
+func CleanupSnapshotFiles(dir string, validFiles map[string]bool) error {
+	// Remove temp files.
+	tmps, _ := filepath.Glob(filepath.Join(dir, "*.hnsw.*.snap.tmp"))
+	for _, p := range tmps {
+		_ = os.Remove(p)
+	}
+
+	// Remove stale snapshots.
+	snaps, _ := filepath.Glob(filepath.Join(dir, "*.hnsw.*.snap"))
+	for _, p := range snaps {
+		name := filepath.Base(p)
+		if !validFiles[name] {
+			_ = os.Remove(p)
+		}
 	}
 
 	return nil
+}
+
+// syncDir fsyncs a directory to ensure rename visibility.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	_ = d.Close()
+	return err
+}
+
+// mustDistanceFunc returns the distance function for a metric, panicking
+// on unknown metrics (should only be called with validated configs).
+func mustDistanceFunc(metric uint8) hnsw.DistanceFunc {
+	fn, err := metricToDistanceFunc(metric)
+	if err != nil {
+		panic(err)
+	}
+	return fn
 }

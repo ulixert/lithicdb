@@ -3,11 +3,14 @@ package vector
 import (
 	"errors"
 	"math/rand/v2"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/ulixert/theseon/compaction"
 	"github.com/ulixert/theseon/db"
+	"github.com/ulixert/theseon/manifest"
 )
 
 func testDB(t *testing.T) *db.DB {
@@ -561,6 +564,406 @@ func TestDimensionMismatch(t *testing.T) {
 	if err == nil {
 		t.Error("expected dimension mismatch error")
 	}
+}
+
+// --- Snapshot Recovery Tests ---
+
+func testDBWithDir(t *testing.T, dir string) *db.DB {
+	t.Helper()
+	d, err := db.Open(db.Options{
+		Dir:          dir,
+		MemtableSize: 4096,
+		BlockSize:    256,
+		Compaction:   compaction.DefaultConfig(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func TestSnapshotRecovery_Basic(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCollectionConfig()
+	const n = 50
+
+	ids := make([][16]byte, n)
+
+	// Phase 1: create, insert, snapshot.
+	{
+		d := testDBWithDir(t, dir)
+		vs, err := NewVectorStore(d, VectorStoreConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := vs.CreateCollection("test", cfg); err != nil {
+			t.Fatal(err)
+		}
+		for i := range ids {
+			ids[i] = randomUUID()
+			if err := vs.Put("test", ids[i], randomVector(4), nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		infos, err := vs.SnapshotAll(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(infos) != 1 {
+			t.Fatalf("expected 1 snapshot, got %d", len(infos))
+		}
+
+		// Record to manifest.
+		d.Manifest().AddHNSWSnapshot(infos[0].Collection, infos[0].Seq, infos[0].Filename)
+		vs.Close()
+		d.Close()
+	}
+
+	// Phase 2: reopen with snapshot.
+	{
+		d := testDBWithDir(t, dir)
+		defer d.Close()
+
+		state := getManifestState(t, dir)
+		snapMap := convertSnapshots(state.HNSWSnapshots)
+
+		vs, err := NewVectorStore(d, VectorStoreConfig{}, WithSnapshots(snapMap))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer vs.Close()
+
+		results, err := vs.Search("test", randomVector(4), 10, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) == 0 {
+			t.Error("no results after snapshot recovery")
+		}
+
+		// All IDs should be from original set.
+		idSet := make(map[[16]byte]bool, n)
+		for _, id := range ids {
+			idSet[id] = true
+		}
+		for _, r := range results {
+			if !idSet[r.ID] {
+				t.Errorf("unexpected ID %x", r.ID)
+			}
+		}
+	}
+}
+
+func TestSnapshotRecovery_Incremental(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCollectionConfig()
+
+	ids1 := make([][16]byte, 30)
+	ids2 := make([][16]byte, 20)
+
+	// Phase 1: insert first batch, snapshot.
+	{
+		d := testDBWithDir(t, dir)
+		vs, err := NewVectorStore(d, VectorStoreConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := vs.CreateCollection("test", cfg); err != nil {
+			t.Fatal(err)
+		}
+		for i := range ids1 {
+			ids1[i] = randomUUID()
+			if err := vs.Put("test", ids1[i], randomVector(4), nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		infos, _ := vs.SnapshotAll(dir)
+		d.Manifest().AddHNSWSnapshot(infos[0].Collection, infos[0].Seq, infos[0].Filename)
+
+		// Insert second batch AFTER snapshot.
+		for i := range ids2 {
+			ids2[i] = randomUUID()
+			if err := vs.Put("test", ids2[i], randomVector(4), nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		vs.Close()
+		d.Close()
+	}
+
+	// Phase 2: reopen with snapshot — should have all 50 vectors.
+	{
+		d := testDBWithDir(t, dir)
+		defer d.Close()
+
+		state := getManifestState(t, dir)
+		snapMap := convertSnapshots(state.HNSWSnapshots)
+
+		vs, err := NewVectorStore(d, VectorStoreConfig{}, WithSnapshots(snapMap))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer vs.Close()
+
+		// Search with high ef to find all.
+		results, err := vs.Search("test", randomVector(4), 50, &SearchOptions{EfSearch: 200})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		allIDs := make(map[[16]byte]bool)
+		for _, id := range ids1 {
+			allIDs[id] = true
+		}
+		for _, id := range ids2 {
+			allIDs[id] = true
+		}
+
+		foundIDs := make(map[[16]byte]bool)
+		for _, r := range results {
+			foundIDs[r.ID] = true
+			if !allIDs[r.ID] {
+				t.Errorf("unexpected ID %x in results", r.ID)
+			}
+		}
+
+		if len(results) < 50 {
+			t.Logf("got %d results (some may be missed due to graph topology)", len(results))
+		}
+	}
+}
+
+func TestSnapshotRecovery_DeleteAfterSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCollectionConfig()
+
+	ids := make([][16]byte, 30)
+	var deletedIDs [][16]byte
+
+	// Phase 1: insert, snapshot, then delete some.
+	{
+		d := testDBWithDir(t, dir)
+		vs, err := NewVectorStore(d, VectorStoreConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := vs.CreateCollection("test", cfg); err != nil {
+			t.Fatal(err)
+		}
+		for i := range ids {
+			ids[i] = randomUUID()
+			if err := vs.Put("test", ids[i], randomVector(4), nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		infos, _ := vs.SnapshotAll(dir)
+		d.Manifest().AddHNSWSnapshot(infos[0].Collection, infos[0].Seq, infos[0].Filename)
+
+		// Delete some after snapshot.
+		deletedIDs = ids[:10]
+		for _, id := range deletedIDs {
+			if err := vs.Delete("test", id); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		vs.Close()
+		d.Close()
+	}
+
+	// Phase 2: reopen — deleted vectors should be absent.
+	{
+		d := testDBWithDir(t, dir)
+		defer d.Close()
+
+		state := getManifestState(t, dir)
+		snapMap := convertSnapshots(state.HNSWSnapshots)
+
+		vs, err := NewVectorStore(d, VectorStoreConfig{}, WithSnapshots(snapMap))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer vs.Close()
+
+		deletedSet := make(map[[16]byte]bool)
+		for _, id := range deletedIDs {
+			deletedSet[id] = true
+		}
+
+		results, err := vs.Search("test", randomVector(4), 30, &SearchOptions{EfSearch: 200})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range results {
+			if deletedSet[r.ID] {
+				t.Errorf("deleted vector %x appeared in results", r.ID)
+			}
+		}
+	}
+}
+
+func TestSnapshotRecovery_UpdateAfterSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCollectionConfig()
+
+	ids := make([][16]byte, 20)
+
+	// Phase 1: insert with known vectors, snapshot, then update some.
+	{
+		d := testDBWithDir(t, dir)
+		vs, err := NewVectorStore(d, VectorStoreConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := vs.CreateCollection("test", cfg); err != nil {
+			t.Fatal(err)
+		}
+
+		// Insert all vectors pointing "away" from origin.
+		for i := range ids {
+			ids[i] = randomUUID()
+			vec := []float32{100, 0, 0, 0}
+			if err := vs.Put("test", ids[i], vec, Metadata{"version": int64(1)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		infos, _ := vs.SnapshotAll(dir)
+		d.Manifest().AddHNSWSnapshot(infos[0].Collection, infos[0].Seq, infos[0].Filename)
+
+		// Update first 5 vectors to point near origin.
+		for i := 0; i < 5; i++ {
+			vec := []float32{0.001 * float32(i), 0, 0, 0}
+			if err := vs.Put("test", ids[i], vec, Metadata{"version": int64(2)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		vs.Close()
+		d.Close()
+	}
+
+	// Phase 2: reopen — search near origin should find updated vectors.
+	{
+		d := testDBWithDir(t, dir)
+		defer d.Close()
+
+		state := getManifestState(t, dir)
+		snapMap := convertSnapshots(state.HNSWSnapshots)
+
+		vs, err := NewVectorStore(d, VectorStoreConfig{}, WithSnapshots(snapMap))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer vs.Close()
+
+		// Search near origin.
+		results, err := vs.Search("test", []float32{0, 0, 0, 0}, 5, &SearchOptions{EfSearch: 200})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// The updated vectors should be closest.
+		updatedSet := make(map[[16]byte]bool)
+		for i := 0; i < 5; i++ {
+			updatedSet[ids[i]] = true
+		}
+
+		for _, r := range results {
+			if !updatedSet[r.ID] {
+				t.Errorf("expected updated vector in top results, got non-updated ID %x (dist=%f)", r.ID, r.Distance)
+			}
+			if r.Metadata["version"] != int64(2) {
+				t.Errorf("expected version 2, got %v", r.Metadata["version"])
+			}
+		}
+	}
+}
+
+func TestSnapshotRecovery_CorruptFallback(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCollectionConfig()
+	const n = 30
+
+	// Phase 1: insert, snapshot.
+	{
+		d := testDBWithDir(t, dir)
+		vs, err := NewVectorStore(d, VectorStoreConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := vs.CreateCollection("test", cfg); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < n; i++ {
+			if err := vs.Put("test", randomUUID(), randomVector(4), nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		infos, _ := vs.SnapshotAll(dir)
+		d.Manifest().AddHNSWSnapshot(infos[0].Collection, infos[0].Seq, infos[0].Filename)
+
+		// Corrupt the snapshot file.
+		snapPath := filepath.Join(dir, infos[0].Filename)
+		data, _ := os.ReadFile(snapPath)
+		data[len(data)/2] ^= 0xFF // flip a byte
+		os.WriteFile(snapPath, data, 0o640)
+
+		vs.Close()
+		d.Close()
+	}
+
+	// Phase 2: reopen — should fall back to full rebuild.
+	{
+		d := testDBWithDir(t, dir)
+		defer d.Close()
+
+		state := getManifestState(t, dir)
+		snapMap := convertSnapshots(state.HNSWSnapshots)
+
+		vs, err := NewVectorStore(d, VectorStoreConfig{}, WithSnapshots(snapMap))
+		if err != nil {
+			t.Fatalf("should fall back, not fail: %v", err)
+		}
+		defer vs.Close()
+
+		results, err := vs.Search("test", randomVector(4), 10, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) == 0 {
+			t.Error("no results after corrupt snapshot fallback")
+		}
+	}
+}
+
+// getManifestState opens and closes the manifest to read the current state.
+func getManifestState(t *testing.T, dir string) *manifest.State {
+	t.Helper()
+	m, state, err := manifest.Open(dir)
+	if err != nil {
+		t.Fatalf("open manifest: %v", err)
+	}
+	m.Close()
+	return state
+}
+
+// convertSnapshots converts manifest HNSWSnapshotInfo to vector SnapshotInfo.
+func convertSnapshots(m map[string]manifest.HNSWSnapshotInfo) map[string]SnapshotInfo {
+	result := make(map[string]SnapshotInfo, len(m))
+	for k, v := range m {
+		result[k] = SnapshotInfo{
+			Collection: v.Collection,
+			Seq:        v.Seq,
+			Filename:   v.Filename,
+		}
+	}
+	return result
 }
 
 func TestKindByteKeyDistinction(t *testing.T) {

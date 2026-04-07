@@ -60,11 +60,12 @@ type DB struct {
 	nextSeq   atomic.Uint64
 	snapshots snapshotRegistry
 
-	flushCh   chan struct{}
-	flushDone *sync.Cond // signaled after each flush, wakes blocked writers
-	compactCh chan struct{}
-	closeCh   chan struct{}
-	wg        sync.WaitGroup
+	flushCh          chan struct{}
+	flushDone        *sync.Cond // signaled after each flush, wakes blocked writers
+	compactCh        chan struct{}
+	closeCh          chan struct{}
+	wg               sync.WaitGroup
+	onCompactionDone func() // optional callback after successful compaction
 }
 
 // Open creates or recovers a DB at the given directory.
@@ -218,9 +219,19 @@ func (db *DB) newMemtable() error {
 	return nil
 }
 
-// currentSeq returns the latest sequence number that has been assigned.
-func (db *DB) currentSeq() uint64 {
+// CurrentSeq returns the latest sequence number that has been assigned.
+func (db *DB) CurrentSeq() uint64 {
 	return db.nextSeq.Load()
+}
+
+// Dir returns the database directory path.
+func (db *DB) Dir() string {
+	return db.opts.Dir
+}
+
+// Manifest returns the database's manifest for recording metadata.
+func (db *DB) Manifest() *manifest.Manifest {
+	return db.manifest
 }
 
 // GetSnapshot returns a point-in-time read view of the database.
@@ -228,7 +239,7 @@ func (db *DB) currentSeq() uint64 {
 // and none that happen after. Callers must call Snapshot.Close() when
 // done to allow compaction to reclaim old versions.
 func (db *DB) GetSnapshot() *Snapshot {
-	seq := db.currentSeq()
+	seq := db.CurrentSeq()
 	db.snapshots.Register(seq)
 	return &Snapshot{db: db, seq: seq}
 }

@@ -20,6 +20,7 @@ import (
 //	2 = SSTableRemoved { id: 8, level: 1 }
 //	3 = Snapshot       { count: 4, entries[]{ id: 8, level: 1, first_key_len: 2, first_key, last_key_len: 2, last_key } }
 //	4 = NextIDs        { next_mem_id: 8, next_seq: 8 }
+//	5 = HNSWSnapshot   { collection_name_len: 2, collection_name, seq: 8, filename_len: 2, filename }
 
 const (
 	// Record header layout
@@ -33,6 +34,7 @@ const (
 	typeSSTableRemoved byte = 2
 	typeSnapshot       byte = 3
 	typeNextIDs        byte = 4
+	typeHNSWSnapshot   byte = 5
 
 	// Field sizes within payloads
 	idSize            = 8  // uint64 SSTable ID
@@ -66,12 +68,18 @@ type Record struct {
 	// SSTableAdded / SSTableRemoved
 	SSTable SSTableInfo
 
-	// Snapshot
-	SSTables []SSTableInfo
+	// Snapshot (type 3): captures the full state
+	SSTables      []SSTableInfo
+	HNSWSnapshots map[string]HNSWSnapshotInfo
 
 	// NextIDs
 	NextMemID uint64
 	NextSeq   uint64
+
+	// HNSWSnapshot
+	HNSWCollection string
+	HNSWSeq        uint64
+	HNSWFilename   string
 }
 
 func encodeRecord(r Record) ([]byte, error) {
@@ -83,9 +91,11 @@ func encodeRecord(r Record) ([]byte, error) {
 	case typeSSTableRemoved:
 		payload = encodeSSTableRemoved(r.SSTable)
 	case typeSnapshot:
-		payload = encodeSnapshot(r.SSTables)
+		payload = encodeSnapshot(r.SSTables, r.HNSWSnapshots)
 	case typeNextIDs:
 		payload = encodeNextIDs(r.NextMemID, r.NextSeq)
+	case typeHNSWSnapshot:
+		payload = encodeHNSWSnapshot(r.HNSWCollection, r.HNSWSeq, r.HNSWFilename)
 	default:
 		return nil, fmt.Errorf("manifest: unknown record type %d", r.Type)
 	}
@@ -143,9 +153,11 @@ func decodeRecord(data []byte) (Record, int, error) {
 	case typeSSTableRemoved:
 		r.SSTable, err = decodeSSTableRemoved(payload)
 	case typeSnapshot:
-		r.SSTables, err = decodeSnapshot(payload)
+		r.SSTables, r.HNSWSnapshots, err = decodeSnapshot(payload)
 	case typeNextIDs:
 		r.NextMemID, r.NextSeq, err = decodeNextIDs(payload)
+	case typeHNSWSnapshot:
+		r.HNSWCollection, r.HNSWSeq, r.HNSWFilename, err = decodeHNSWSnapshot(payload)
 	default:
 		return Record{}, 0, ErrUnknownType
 	}
@@ -246,25 +258,38 @@ func decodeSSTableRemoved(data []byte) (SSTableInfo, error) {
 
 // --- Snapshot ---
 
-func encodeSnapshot(tables []SSTableInfo) []byte {
+// encodeSnapshot encodes the full manifest state: SSTables + HNSW snapshots.
+// Format: [sstable_count:4][sstables...][hnsw_count:4][hnsw_entries...]
+func encodeSnapshot(tables []SSTableInfo, hnswSnaps map[string]HNSWSnapshotInfo) []byte {
 	size := snapshotCountSize
 	for _, t := range tables {
 		size += idSize + levelSize + keyLenSize + len(t.FirstKey) + keyLenSize + len(t.LastKey)
 	}
+	// HNSW section
+	size += snapshotCountSize
+	for _, h := range hnswSnaps {
+		size += keyLenSize + len(h.Collection) + idSize + keyLenSize + len(h.Filename)
+	}
 
 	buf := make([]byte, 0, size)
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(tables)))
-
 	for _, t := range tables {
 		buf = appendSSTableInfo(buf, t)
+	}
+
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(hnswSnaps)))
+	for _, h := range hnswSnaps {
+		buf = append(buf, encodeHNSWSnapshot(h.Collection, h.Seq, h.Filename)...)
 	}
 
 	return buf
 }
 
-func decodeSnapshot(data []byte) ([]SSTableInfo, error) {
+// decodeSnapshot decodes the full manifest state. Backward-compatible:
+// if no HNSW section is present (old format), returns an empty map.
+func decodeSnapshot(data []byte) ([]SSTableInfo, map[string]HNSWSnapshotInfo, error) {
 	if len(data) < snapshotCountSize {
-		return nil, ErrShortRecord
+		return nil, nil, ErrShortRecord
 	}
 
 	count := int(binary.LittleEndian.Uint32(data[:snapshotCountSize]))
@@ -274,13 +299,33 @@ func decodeSnapshot(data []byte) ([]SSTableInfo, error) {
 	for i := 0; i < count; i++ {
 		info, n, err := decodeSSTableInfoAt(data[offset:])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		tables[i] = info
 		offset += n
 	}
 
-	return tables, nil
+	// Parse HNSW section if present (backward-compatible with old snapshots).
+	hnswSnaps := make(map[string]HNSWSnapshotInfo)
+	if offset+snapshotCountSize <= len(data) {
+		hnswCount := int(binary.LittleEndian.Uint32(data[offset:]))
+		offset += snapshotCountSize
+		for i := 0; i < hnswCount; i++ {
+			col, seq, filename, err := decodeHNSWSnapshot(data[offset:])
+			if err != nil {
+				return nil, nil, err
+			}
+			hnswSnaps[col] = HNSWSnapshotInfo{
+				Collection: col,
+				Seq:        seq,
+				Filename:   filename,
+			}
+			// Advance offset past this entry.
+			offset += keyLenSize + len(col) + idSize + keyLenSize + len(filename)
+		}
+	}
+
+	return tables, hnswSnaps, nil
 }
 
 // --- NextIDs ---
@@ -299,4 +344,52 @@ func decodeNextIDs(data []byte) (nextMemID, nextSeq uint64, err error) {
 	return binary.LittleEndian.Uint64(data[:idSize]),
 		binary.LittleEndian.Uint64(data[idSize:]),
 		nil
+}
+
+// --- HNSWSnapshot ---
+// Payload: [collection_name_len:2][collection_name][seq:8][filename_len:2][filename]
+
+func encodeHNSWSnapshot(collection string, seq uint64, filename string) []byte {
+	size := keyLenSize + len(collection) + idSize + keyLenSize + len(filename)
+	buf := make([]byte, 0, size)
+	buf = binary.LittleEndian.AppendUint16(buf, uint16(len(collection)))
+	buf = append(buf, collection...)
+	buf = binary.LittleEndian.AppendUint64(buf, seq)
+	buf = binary.LittleEndian.AppendUint16(buf, uint16(len(filename)))
+	buf = append(buf, filename...)
+	return buf
+}
+
+func decodeHNSWSnapshot(data []byte) (collection string, seq uint64, filename string, err error) {
+	const minSize = keyLenSize + idSize + keyLenSize // 2 + 8 + 2 = 12
+	if len(data) < minSize {
+		return "", 0, "", ErrShortRecord
+	}
+
+	offset := 0
+	colLen := int(binary.LittleEndian.Uint16(data[offset:]))
+	offset += keyLenSize
+	if offset+colLen > len(data) {
+		return "", 0, "", ErrShortRecord
+	}
+	collection = string(data[offset : offset+colLen])
+	offset += colLen
+
+	if offset+idSize > len(data) {
+		return "", 0, "", ErrShortRecord
+	}
+	seq = binary.LittleEndian.Uint64(data[offset:])
+	offset += idSize
+
+	if offset+keyLenSize > len(data) {
+		return "", 0, "", ErrShortRecord
+	}
+	fnLen := int(binary.LittleEndian.Uint16(data[offset:]))
+	offset += keyLenSize
+	if offset+fnLen > len(data) {
+		return "", 0, "", ErrShortRecord
+	}
+	filename = string(data[offset : offset+fnLen])
+
+	return collection, seq, filename, nil
 }
