@@ -89,7 +89,17 @@ func (db *DB) runCompaction() {
 			)
 			return
 		}
+
+		if db.onCompactionDone != nil {
+			db.onCompactionDone()
+		}
 	}
+}
+
+// OnCompactionDone registers a callback that runs after each successful
+// compaction. Used by the caller to trigger HNSW snapshot writes.
+func (db *DB) OnCompactionDone(fn func()) {
+	db.onCompactionDone = fn
 }
 
 // buildLevelState creates a snapshot of the current LSM levels for

@@ -12,7 +12,7 @@ import (
 // Returns the value and true if found. If the key has been
 // deleted, returns a tombstone value with found=true.
 func (db *DB) Get(key []byte) (kv.Value, bool) {
-	return db.getAt(key, db.currentSeq())
+	return db.getAt(key, db.CurrentSeq())
 }
 
 // Scan returns an iterator over all entries in sorted key order.
@@ -28,13 +28,13 @@ func (db *DB) Get(key []byte) (kv.Value, bool) {
 //
 // Returns internal keys. The caller must call Close().
 func (db *DB) Scan() iterator.Iterator {
-	return iterator.NewSnapshotIterator(db.rawScan(), db.currentSeq())
+	return iterator.NewSnapshotIterator(db.rawScan(), db.CurrentSeq())
 }
 
 // ScanRange returns an iterator over entries whose user key is in
 // [start, end). The caller must call Close().
 func (db *DB) ScanRange(start, end []byte) iterator.Iterator {
-	return iterator.NewSnapshotIterator(db.rawScanRange(start, end), db.currentSeq())
+	return iterator.NewSnapshotIterator(db.rawScanRange(start, end), db.CurrentSeq())
 }
 
 // getAt performs a point lookup for the newest version of a user key
