@@ -162,10 +162,16 @@ func (m *Manifest) applyRecord(r Record) {
 	case typeSSTableRemoved:
 		delete(m.tables, r.SSTable.ID)
 	case typeSnapshot:
-		// Snapshot replaces the entire table set
+		// Snapshot replaces the entire state.
 		m.tables = make(map[uint64]SSTableInfo, len(r.SSTables))
 		for _, t := range r.SSTables {
 			m.tables[t.ID] = t
+		}
+		if r.HNSWSnapshots != nil {
+			m.hnswSnapshots = make(map[string]HNSWSnapshotInfo, len(r.HNSWSnapshots))
+			for k, v := range r.HNSWSnapshots {
+				m.hnswSnapshots[k] = v
+			}
 		}
 	case typeNextIDs:
 		m.nextMemID = r.NextMemID
@@ -327,9 +333,15 @@ func (m *Manifest) maybeSnapshot() error {
 		tables = append(tables, t)
 	}
 
+	hnswSnaps := make(map[string]HNSWSnapshotInfo, len(m.hnswSnapshots))
+	for k, v := range m.hnswSnapshots {
+		hnswSnaps[k] = v
+	}
+
 	if err := m.writeRecord(Record{
-		Type:     typeSnapshot,
-		SSTables: tables,
+		Type:          typeSnapshot,
+		SSTables:      tables,
+		HNSWSnapshots: hnswSnaps,
 	}); err != nil {
 		return err
 	}

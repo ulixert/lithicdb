@@ -68,8 +68,9 @@ type Record struct {
 	// SSTableAdded / SSTableRemoved
 	SSTable SSTableInfo
 
-	// Snapshot
-	SSTables []SSTableInfo
+	// Snapshot (type 3): captures the full state
+	SSTables      []SSTableInfo
+	HNSWSnapshots map[string]HNSWSnapshotInfo
 
 	// NextIDs
 	NextMemID uint64
@@ -90,7 +91,7 @@ func encodeRecord(r Record) ([]byte, error) {
 	case typeSSTableRemoved:
 		payload = encodeSSTableRemoved(r.SSTable)
 	case typeSnapshot:
-		payload = encodeSnapshot(r.SSTables)
+		payload = encodeSnapshot(r.SSTables, r.HNSWSnapshots)
 	case typeNextIDs:
 		payload = encodeNextIDs(r.NextMemID, r.NextSeq)
 	case typeHNSWSnapshot:
@@ -152,7 +153,7 @@ func decodeRecord(data []byte) (Record, int, error) {
 	case typeSSTableRemoved:
 		r.SSTable, err = decodeSSTableRemoved(payload)
 	case typeSnapshot:
-		r.SSTables, err = decodeSnapshot(payload)
+		r.SSTables, r.HNSWSnapshots, err = decodeSnapshot(payload)
 	case typeNextIDs:
 		r.NextMemID, r.NextSeq, err = decodeNextIDs(payload)
 	case typeHNSWSnapshot:
@@ -257,25 +258,38 @@ func decodeSSTableRemoved(data []byte) (SSTableInfo, error) {
 
 // --- Snapshot ---
 
-func encodeSnapshot(tables []SSTableInfo) []byte {
+// encodeSnapshot encodes the full manifest state: SSTables + HNSW snapshots.
+// Format: [sstable_count:4][sstables...][hnsw_count:4][hnsw_entries...]
+func encodeSnapshot(tables []SSTableInfo, hnswSnaps map[string]HNSWSnapshotInfo) []byte {
 	size := snapshotCountSize
 	for _, t := range tables {
 		size += idSize + levelSize + keyLenSize + len(t.FirstKey) + keyLenSize + len(t.LastKey)
 	}
+	// HNSW section
+	size += snapshotCountSize
+	for _, h := range hnswSnaps {
+		size += keyLenSize + len(h.Collection) + idSize + keyLenSize + len(h.Filename)
+	}
 
 	buf := make([]byte, 0, size)
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(tables)))
-
 	for _, t := range tables {
 		buf = appendSSTableInfo(buf, t)
+	}
+
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(hnswSnaps)))
+	for _, h := range hnswSnaps {
+		buf = append(buf, encodeHNSWSnapshot(h.Collection, h.Seq, h.Filename)...)
 	}
 
 	return buf
 }
 
-func decodeSnapshot(data []byte) ([]SSTableInfo, error) {
+// decodeSnapshot decodes the full manifest state. Backward-compatible:
+// if no HNSW section is present (old format), returns an empty map.
+func decodeSnapshot(data []byte) ([]SSTableInfo, map[string]HNSWSnapshotInfo, error) {
 	if len(data) < snapshotCountSize {
-		return nil, ErrShortRecord
+		return nil, nil, ErrShortRecord
 	}
 
 	count := int(binary.LittleEndian.Uint32(data[:snapshotCountSize]))
@@ -285,13 +299,33 @@ func decodeSnapshot(data []byte) ([]SSTableInfo, error) {
 	for i := 0; i < count; i++ {
 		info, n, err := decodeSSTableInfoAt(data[offset:])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		tables[i] = info
 		offset += n
 	}
 
-	return tables, nil
+	// Parse HNSW section if present (backward-compatible with old snapshots).
+	hnswSnaps := make(map[string]HNSWSnapshotInfo)
+	if offset+snapshotCountSize <= len(data) {
+		hnswCount := int(binary.LittleEndian.Uint32(data[offset:]))
+		offset += snapshotCountSize
+		for i := 0; i < hnswCount; i++ {
+			col, seq, filename, err := decodeHNSWSnapshot(data[offset:])
+			if err != nil {
+				return nil, nil, err
+			}
+			hnswSnaps[col] = HNSWSnapshotInfo{
+				Collection: col,
+				Seq:        seq,
+				Filename:   filename,
+			}
+			// Advance offset past this entry.
+			offset += keyLenSize + len(col) + idSize + keyLenSize + len(filename)
+		}
+	}
+
+	return tables, hnswSnaps, nil
 }
 
 // --- NextIDs ---
