@@ -1,6 +1,7 @@
 package vector
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -605,4 +606,135 @@ func (vs *VectorStore) loadFromSnapshot(name string, col *collectionState, snap 
 	)
 
 	return nil
+}
+
+// SnapshotAll writes HNSW snapshots for all non-empty collections.
+// Each collection's snapshot seq is captured under that collection's
+// write lock, ensuring it exactly matches the graph state.
+func (vs *VectorStore) SnapshotAll(dir string) ([]SnapshotInfo, error) {
+	vs.mu.RLock()
+	names := make([]string, 0, len(vs.collections))
+	for name := range vs.collections {
+		names = append(names, name)
+	}
+	vs.mu.RUnlock()
+
+	var results []SnapshotInfo
+	for _, name := range names {
+		vs.mu.RLock()
+		col := vs.collections[name]
+		vs.mu.RUnlock()
+		if col == nil || col.graph.Len() == 0 {
+			continue
+		}
+
+		info, err := vs.snapshotCollection(dir, name, col)
+		if err != nil {
+			vs.logger.Error("failed to snapshot collection",
+				"collection", name, "error", err)
+			continue
+		}
+		results = append(results, info)
+	}
+
+	return results, nil
+}
+
+// snapshotCollection writes a single collection's HNSW snapshot to disk.
+func (vs *VectorStore) snapshotCollection(dir, name string, col *collectionState) (SnapshotInfo, error) {
+	// Capture seq under the collection's write lock to ensure it matches
+	// the graph state exactly.
+	col.mu.Lock()
+	seq := vs.db.CurrentSeq()
+	metric := col.config.Metric
+
+	filename := fmt.Sprintf("%s.hnsw.%d.snap", name, seq)
+	tmpPath := filepath.Join(dir, filename+".tmp")
+	finalPath := filepath.Join(dir, filename)
+
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
+		col.mu.Unlock()
+		return SnapshotInfo{}, fmt.Errorf("create temp file: %w", err)
+	}
+
+	bw := bufio.NewWriterSize(f, 4*1024*1024) // 4MB buffer
+	err = col.graph.WriteSnapshot(bw, seq, metric)
+	col.mu.Unlock() // release collection lock; writes to this collection can resume
+
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return SnapshotInfo{}, fmt.Errorf("write snapshot: %w", err)
+	}
+
+	if err := bw.Flush(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return SnapshotInfo{}, fmt.Errorf("flush: %w", err)
+	}
+
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return SnapshotInfo{}, fmt.Errorf("fsync: %w", err)
+	}
+	_ = f.Close()
+
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return SnapshotInfo{}, fmt.Errorf("rename: %w", err)
+	}
+
+	if err := syncDir(dir); err != nil {
+		return SnapshotInfo{}, fmt.Errorf("sync dir: %w", err)
+	}
+
+	return SnapshotInfo{
+		Collection: name,
+		Seq:        seq,
+		Filename:   filename,
+	}, nil
+}
+
+// CleanupSnapshotFiles removes stale snapshot files not in validFiles,
+// and any leftover .snap.tmp files.
+func CleanupSnapshotFiles(dir string, validFiles map[string]bool) error {
+	// Remove temp files.
+	tmps, _ := filepath.Glob(filepath.Join(dir, "*.hnsw.*.snap.tmp"))
+	for _, p := range tmps {
+		_ = os.Remove(p)
+	}
+
+	// Remove stale snapshots.
+	snaps, _ := filepath.Glob(filepath.Join(dir, "*.hnsw.*.snap"))
+	for _, p := range snaps {
+		name := filepath.Base(p)
+		if !validFiles[name] {
+			_ = os.Remove(p)
+		}
+	}
+
+	return nil
+}
+
+// syncDir fsyncs a directory to ensure rename visibility.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	_ = d.Close()
+	return err
+}
+
+// mustDistanceFunc returns the distance function for a metric, panicking
+// on unknown metrics (should only be called with validated configs).
+func mustDistanceFunc(metric uint8) hnsw.DistanceFunc {
+	fn, err := metricToDistanceFunc(metric)
+	if err != nil {
+		panic(err)
+	}
+	return fn
 }
