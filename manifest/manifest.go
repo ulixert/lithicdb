@@ -32,9 +32,19 @@ type Manifest struct {
 	nextMemID uint64
 	nextSeq   uint64
 
+	// HNSW snapshot tracking: collection name → latest snapshot info.
+	hnswSnapshots map[string]HNSWSnapshotInfo
+
 	// Track how many records since the last snapshot to decide
 	// when to write a new snapshot.
 	recordsSinceSnapshot int
+}
+
+// HNSWSnapshotInfo describes a persisted HNSW graph snapshot file.
+type HNSWSnapshotInfo struct {
+	Collection string
+	Seq        uint64
+	Filename   string
 }
 
 const snapshotInterval = 64 // write a snapshot every N records
@@ -53,6 +63,9 @@ type State struct {
 
 	NextMemID uint64
 	NextSeq   uint64
+
+	// HNSWSnapshots maps collection name → latest HNSW snapshot info.
+	HNSWSnapshots map[string]HNSWSnapshotInfo
 }
 
 // Create creates a new manifest file in dir. Used on the first startup
@@ -69,11 +82,12 @@ func Create(dir string, nextMemID, nextSeq uint64) (*Manifest, error) {
 	}
 
 	m := &Manifest{
-		file:      f,
-		dir:       dir,
-		tables:    make(map[uint64]SSTableInfo),
-		nextMemID: nextMemID,
-		nextSeq:   nextSeq,
+		file:          f,
+		dir:           dir,
+		tables:        make(map[uint64]SSTableInfo),
+		hnswSnapshots: make(map[string]HNSWSnapshotInfo),
+		nextMemID:     nextMemID,
+		nextSeq:       nextSeq,
 	}
 
 	// Write initial NextIDs record
@@ -100,8 +114,9 @@ func Open(dir string) (*Manifest, *State, error) {
 	}
 
 	m := &Manifest{
-		dir:    dir,
-		tables: make(map[uint64]SSTableInfo),
+		dir:           dir,
+		tables:        make(map[uint64]SSTableInfo),
+		hnswSnapshots: make(map[string]HNSWSnapshotInfo),
 	}
 
 	// Replay all records
@@ -155,14 +170,24 @@ func (m *Manifest) applyRecord(r Record) {
 	case typeNextIDs:
 		m.nextMemID = r.NextMemID
 		m.nextSeq = r.NextSeq
+	case typeHNSWSnapshot:
+		m.hnswSnapshots[r.HNSWCollection] = HNSWSnapshotInfo{
+			Collection: r.HNSWCollection,
+			Seq:        r.HNSWSeq,
+			Filename:   r.HNSWFilename,
+		}
 	}
 }
 
 // buildState constructs a State from the current in-memory tables.
 func (m *Manifest) buildState() *State {
 	s := &State{
-		NextMemID: m.nextMemID,
-		NextSeq:   m.nextSeq,
+		NextMemID:     m.nextMemID,
+		NextSeq:       m.nextSeq,
+		HNSWSnapshots: make(map[string]HNSWSnapshotInfo, len(m.hnswSnapshots)),
+	}
+	for k, v := range m.hnswSnapshots {
+		s.HNSWSnapshots[k] = v
 	}
 
 	// Find the maximum level to size the slice
@@ -248,6 +273,27 @@ func (m *Manifest) UpdateNextIDs(nextMemID, nextSeq uint64) error {
 		NextMemID: nextMemID,
 		NextSeq:   nextSeq,
 	})
+}
+
+// AddHNSWSnapshot records that an HNSW graph snapshot has been written.
+func (m *Manifest) AddHNSWSnapshot(collection string, seq uint64, filename string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.writeRecord(Record{
+		Type:           typeHNSWSnapshot,
+		HNSWCollection: collection,
+		HNSWSeq:        seq,
+		HNSWFilename:   filename,
+	}); err != nil {
+		return err
+	}
+	m.hnswSnapshots[collection] = HNSWSnapshotInfo{
+		Collection: collection,
+		Seq:        seq,
+		Filename:   filename,
+	}
+	return nil
 }
 
 // writeRecord encodes and appends a record, then fsyncs.
