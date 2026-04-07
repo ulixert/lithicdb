@@ -13,7 +13,6 @@ import "encoding/binary"
 //   [level:1]
 //   [dim:2 LE]
 //   [vector_data: dim * 4 bytes float32 LE]
-//   [num_layers:1]                  // should equal level + 1
 //   per layer:
 //     [num_neighbors:2 LE]
 //     [neighbor_ids: num_neighbors * 8 bytes LE]
