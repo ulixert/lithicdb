@@ -23,6 +23,7 @@ external libraries.
 6. [Who's Alive? Building SWIM Failure Detection from Scratch](https://ulixert.github.io/posts/theseon-swim-protocol/)
 7. [Quorum Reads, Quorum Writes, and the Repair That Follows](https://ulixert.github.io/posts/theseon-quorum-coordinator/)
 10. [Building HNSW from Scratch: Graph Construction, Beam Search, and What Recall Actually Measures](https://ulixert.github.io/posts/theseon-hnsw-scratch/)
+11. [Making Vectors Durable: KV Integration, Snapshot Persistence, and the Bugs Along the Way](https://ulixert.github.io/posts/theseon-vector-kv-integration/)
 
 ## Getting Started
 
@@ -391,7 +392,7 @@ active + immutable memtables) is negligible.
 - [x] Binary vector encoding with typed metadata (string, int64, float64, bool, bytes)
 - [x] Per-collection locking with insert-before-tombstone update ordering
 - [x] Self-healing recovery: HNSW graphs rebuilt from KV on restart
-- [ ] HNSW snapshot persistence (avoid full rebuild on restart)
+- [x] HNSW snapshot persistence (avoid full rebuild on restart)
 - [ ] Metadata filtering (in-memory post-filter + secondary index)
 - [ ] Distributed vector search (fan-out across replicas via gRPC, oversample + rerank)
 
