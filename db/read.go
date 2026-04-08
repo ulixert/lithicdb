@@ -37,6 +37,27 @@ func (db *DB) ScanRange(start, end []byte) iterator.Iterator {
 	return iterator.NewSnapshotIterator(db.rawScanRange(start, end), db.CurrentSeq())
 }
 
+// ScanPrefix returns an iterator over entries whose user key starts
+// with the prefix. The caller must call Close().
+func (db *DB) ScanPrefix(prefix []byte) iterator.Iterator {
+	return db.ScanRange(prefix, prefixSuccessor(prefix))
+}
+
+// prefixSuccessor returns the lexicographic successor of a prefix,
+// used as the exclusive end bound for prefix scans. If the prefix
+// is all 0xFF bytes, returns nil to scan to the end.
+func prefixSuccessor(prefix []byte) []byte {
+	end := make([]byte, len(prefix))
+	copy(end, prefix)
+	for i := len(end) - 1; i >= 0; i-- {
+		if end[i] < 0xFF {
+			end[i]++
+			return end[:i+1]
+		}
+	}
+	return nil
+}
+
 // getAt performs a point lookup for the newest version of a user key
 // with seq <= maxSeq. Searches: active → immutables → L0 → L1+.
 func (db *DB) getAt(key []byte, maxSeq uint64) (kv.Value, bool) {
