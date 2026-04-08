@@ -254,3 +254,32 @@ func extractNodeID(hintKey []byte) string {
 	}
 	return string(hintKey[2 : 2+nidLen])
 }
+
+// ExtractTimestamp reads the HLC timestamp from a hint key.
+func ExtractTimestamp(hintKey []byte) hlc.Timestamp {
+	if len(hintKey) < 2 {
+		return hlc.Timestamp{}
+	}
+	nidLen := int(binary.BigEndian.Uint16(hintKey[0:2]))
+	off := 2 + nidLen
+	if len(hintKey) < off+12 {
+		return hlc.Timestamp{}
+	}
+	return hlc.Timestamp{
+		WallTime: int64(binary.BigEndian.Uint64(hintKey[off : off+8])),
+		Logical:  binary.BigEndian.Uint32(hintKey[off+8 : off+12]),
+	}
+}
+
+// ExtractUserKey reads the user key suffix from a hint key.
+func ExtractUserKey(hintKey []byte) []byte {
+	if len(hintKey) < 2 {
+		return nil
+	}
+	nidLen := int(binary.BigEndian.Uint16(hintKey[0:2]))
+	off := 2 + nidLen + 12 // skip nodeID_len + nodeID + walltime + logical
+	if len(hintKey) < off {
+		return nil
+	}
+	return hintKey[off:]
+}
