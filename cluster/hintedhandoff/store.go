@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ulixert/theseon/db"
+	"github.com/ulixert/theseon/iterator"
 	"github.com/ulixert/theseon/kv"
 )
 
@@ -103,6 +104,49 @@ func (s *Store) computeLogicalSize() {
 		iter.Next()
 	}
 	s.size = total
+}
+
+// Iterate returns an iterator over all live hints for the given target
+// node. Hints are ordered by timestamp then user key. Tombstoned
+// entries (from prior Remove calls) are skipped automatically.
+// The caller must close the iterator when done.
+func (s *Store) Iterate(targetNodeID string) iterator.Iterator {
+	prefix := targetPrefix(targetNodeID)
+	f := &tombstoneFilter{inner: s.db.ScanPrefix(prefix)}
+	f.skipTombstones()
+	return f
+}
+
+// tombstoneFilter wraps an iterator and skips entries with nil values
+// (tombstones left by db.Delete before compaction cleans them up).
+type tombstoneFilter struct {
+	inner iterator.Iterator
+}
+
+// Key returns the user key (hint key without the internal seq suffix).
+func (f *tombstoneFilter) Key() []byte   { return kv.UserKey(f.inner.Key()) }
+func (f *tombstoneFilter) Value() []byte { return f.inner.Value() }
+func (f *tombstoneFilter) IsValid() bool { return f.inner.IsValid() }
+func (f *tombstoneFilter) Err() error    { return f.inner.Err() }
+func (f *tombstoneFilter) Close() error  { return f.inner.Close() }
+
+func (f *tombstoneFilter) Next() {
+	f.inner.Next()
+	f.skipTombstones()
+}
+
+func (f *tombstoneFilter) skipTombstones() {
+	for f.inner.IsValid() && f.inner.Value() == nil {
+		f.inner.Next()
+	}
+}
+
+// targetPrefix returns the prefix for scanning all hints for a target node.
+func targetPrefix(nodeID string) []byte {
+	buf := make([]byte, 2+len(nodeID))
+	binary.BigEndian.PutUint16(buf[0:2], uint16(len(nodeID)))
+	copy(buf[2:], nodeID)
+	return buf
 }
 
 // extractNodeID reads the nodeID from a hint key.
