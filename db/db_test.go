@@ -217,6 +217,57 @@ func TestDB_ScanRange(t *testing.T) {
 	}
 }
 
+func TestDB_ScanPrefix(t *testing.T) {
+	dir := t.TempDir()
+	d, err := Open(testOpts(dir))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+
+	d.Put([]byte("user:1"), []byte("alice"))
+	d.Put([]byte("user:2"), []byte("bob"))
+	d.Put([]byte("user:3"), []byte("carol"))
+	d.Put([]byte("order:1"), []byte("o1"))
+	d.Put([]byte("order:2"), []byte("o2"))
+
+	keys := collectUserKeys(t, d.ScanPrefix([]byte("user:")))
+	if len(keys) != 3 {
+		t.Fatalf("got %d keys, want 3", len(keys))
+	}
+	if keys[0] != "user:1" || keys[1] != "user:2" || keys[2] != "user:3" {
+		t.Errorf("keys = %v, want [user:1 user:2 user:3]", keys)
+	}
+
+	orderKeys := collectUserKeys(t, d.ScanPrefix([]byte("order:")))
+	if len(orderKeys) != 2 {
+		t.Fatalf("got %d keys, want 2", len(orderKeys))
+	}
+
+	noKeys := collectUserKeys(t, d.ScanPrefix([]byte("missing:")))
+	if len(noKeys) != 0 {
+		t.Fatalf("got %d keys for missing prefix, want 0", len(noKeys))
+	}
+}
+
+func TestDB_ScanPrefix_AllFF(t *testing.T) {
+	dir := t.TempDir()
+	d, err := Open(testOpts(dir))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+
+	d.Put([]byte{0xFF, 0xFF, 0x01}, []byte("a"))
+	d.Put([]byte{0xFF, 0xFF, 0x02}, []byte("b"))
+	d.Put([]byte("other"), []byte("c"))
+
+	keys := collectUserKeys(t, d.ScanPrefix([]byte{0xFF, 0xFF}))
+	if len(keys) != 2 {
+		t.Fatalf("got %d keys, want 2", len(keys))
+	}
+}
+
 func TestDB_FlushTriggered(t *testing.T) {
 	dir := t.TempDir()
 	opts := testOpts(dir)
