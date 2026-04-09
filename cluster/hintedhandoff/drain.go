@@ -1,6 +1,7 @@
 package hintedhandoff
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
@@ -172,6 +173,41 @@ func (d *Drainer) sweep() {
 	}
 }
 
+// purgeExpired deletes hints that have exceeded the TTL.
+func (d *Drainer) purgeExpired(nodeID string) {
+	type entry struct {
+		key     []byte
+		envSize int64
+	}
+
+	now := time.Now()
+	ttl := d.cfg.Store.cfg.HintTTL
+
+	// Collect expired keys under iterator (read lock).
+	var expired []entry
+	iter := d.cfg.Store.Iterate(nodeID)
+	for iter.IsValid() {
+		hintKey := make([]byte, len(iter.Key()))
+		copy(hintKey, iter.Key())
+		envSize := int64(len(iter.Value()))
+		ts := ExtractTimestamp(hintKey)
+
+		hintAge := now.Sub(time.Unix(0, ts.WallTime))
+		if hintAge > ttl {
+			expired = append(expired, entry{key: hintKey, envSize: envSize})
+		}
+		iter.Next()
+	}
+	_ = iter.Close()
+
+	// Delete outside iterator (needs write lock).
+	for _, e := range expired {
+		if err := d.cfg.Store.Remove(e.key, e.envSize); err != nil {
+			d.cfg.Logger.Warn("failed to purge expired hint", "node", nodeID, "err", err)
+		}
+	}
+}
+
 // drainTarget replays all hints for a single target node.
 func (d *Drainer) drainTarget(nodeID string) {
 	addr := d.resolveAddr(nodeID)
@@ -222,10 +258,120 @@ type hintEntry struct {
 }
 
 // collectBatch reads up to MaxBatchBytes / MaxBatchItems hints for a target.
+// Expired and corrupt hints are collected separately and deleted after
+// the iterator is closed (to avoid deadlock with the DB write lock).
 func (d *Drainer) collectBatch(nodeID string) []hintEntry {
+	type expiredEntry struct {
+		key     []byte
+		envSize int64
+	}
 
+	var batch []hintEntry
+	var expired []expiredEntry
+	var batchBytes int64
+	now := time.Now()
+	ttl := d.cfg.Store.cfg.HintTTL
+
+	// Phase 1: scan under iterator (holds DB read lock).
+	iter := d.cfg.Store.Iterate(nodeID)
+	for iter.IsValid() && batchBytes < d.cfg.MaxBatchBytes && len(batch) < d.cfg.MaxBatchItems {
+		hintKey := make([]byte, len(iter.Key()))
+		copy(hintKey, iter.Key())
+		envData := make([]byte, len(iter.Value()))
+		copy(envData, iter.Value())
+		envSize := int64(len(envData))
+
+		ts := ExtractTimestamp(hintKey)
+
+		// Check TTL - expired hints deferred for deletion.
+		hintAge := now.Sub(time.Unix(0, ts.WallTime))
+		if hintAge > ttl {
+			expired = append(expired, expiredEntry{key: hintKey, envSize: envSize})
+			iter.Next()
+			continue
+		}
+
+		// Decode the envelope to extract the deleted flag for the RPC.
+		envelope, err := d.cfg.DecodeEnvelope(envData)
+		if err != nil {
+			d.cfg.Logger.Warn("corrupt hint envelope, will delete", "err", err)
+			expired = append(expired, expiredEntry{key: hintKey, envSize: envSize})
+			iter.Next()
+			continue
+		}
+
+		userKey := ExtractUserKey(hintKey)
+		batch = append(batch, hintEntry{
+			hintKey: hintKey,
+			userKey: userKey,
+			value:   envelope.Value,
+			envSize: envSize,
+			ts:      envelope.Timestamp,
+			deleted: envelope.Deleted,
+		})
+		batchBytes += envSize
+		iter.Next()
+	}
+	_ = iter.Close()
+
+	// Phase 2: delete expired/corrupt hints (needs DB write lock).
+	for _, e := range expired {
+		if err := d.cfg.Store.Remove(e.key, e.envSize); err != nil {
+			d.cfg.Logger.Warn("failed to purge expired hint", "err", err)
+		}
+	}
+
+	return batch
 }
 
+// replayBatch sends a batch of hints to the target node via ReplicateWriteBatch.
+func (d *Drainer) replayBatch(addr string, batch []hintEntry) error {
+	client, err := d.cfg.Dialer.GetClient(addr)
+	if err != nil {
+		return err
+	}
+
+	entries := make([]*pb.ReplicateWriteRequest, len(batch))
+	for i, h := range batch {
+		entries[i] = &pb.ReplicateWriteRequest{
+			Key:   h.userKey,
+			Value: h.value,
+			Timestamp: &pb.HLCTimestamp{
+				WallTime: h.ts.WallTime,
+				Logical:  h.ts.Logical,
+				NodeId:   h.ts.NodeID,
+			},
+			Deleted: h.deleted,
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err = client.ReplicateWriteBatch(ctx, &pb.ReplicateWriteBatchRequest{
+		Entries: entries,
+	})
+	return err
+}
+
+// retryReplay retries the batch replay with backoff.
+// Returns true if successful, false if all retries are exhausted.
+func (d *Drainer) retryReplay(addr string, batch []hintEntry) bool {
+	for attempt := 0; attempt < d.cfg.MaxRetries; attempt++ {
+		select {
+		case <-d.stopCh:
+			return false
+		case <-time.After(d.cfg.RetryDelay):
+		}
+
+		if err := d.replayBatch(addr, batch); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveAddr finds the network address for a node ID.
 func (d *Drainer) resolveAddr(nodeID string) string {
 	for _, m := range d.cfg.Membership.GetMemberInfos() {
 		if m.NodeID == nodeID {
