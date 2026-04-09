@@ -22,6 +22,7 @@ external libraries.
 5. [Snapshots, Transactions, and the Art of Not Blocking Writers](https://ulixert.github.io/posts/theseon-mvcc-transactions/)
 6. [Who's Alive? Building SWIM Failure Detection from Scratch](https://ulixert.github.io/posts/theseon-swim-protocol/)
 7. [Quorum Reads, Quorum Writes, and the Repair That Follows](https://ulixert.github.io/posts/theseon-quorum-coordinator/)
+8. [Buffering Writes for Dead Replicas: Hinted Handoff](https://ulixert.github.io/posts/theseon-hinted-handoff/)
 10. [Building HNSW from Scratch: Graph Construction, Beam Search, and What Recall Actually Measures](https://ulixert.github.io/posts/theseon-hnsw-scratch/)
 11. [Making Vectors Durable: KV Integration, Snapshot Persistence, and the Bugs Along the Way](https://ulixert.github.io/posts/theseon-vector-kv-integration/)
 
@@ -378,7 +379,7 @@ active + immutable memtables) is negligible.
 - [x] SWIM gossip protocol for decentralized failure detection
 - [x] Quorum coordinator with tunable R/W consistency (R + W > N)
 - [x] Async read repair on quorum reads
-- [ ] Hinted handoff for temporary node failures
+- [x] Hinted handoff for temporary node failures
 - [ ] Merkle-tree anti-entropy with tombstone GC
 - [ ] Two-phase node join (JOINING → ACTIVE) with anti-entropy bootstrap
 - [ ] Admin CLI for explicit topology management (join, activate, remove)
