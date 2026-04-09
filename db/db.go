@@ -21,6 +21,7 @@ type Options struct {
 	BlockSize         int
 	BlockCacheSize    int64 // total block cache capacity in bytes (0 = 8MB default)
 	MaxImmutableCount int   // max unflushed memtables before writes block (0 = 5)
+	DisableWALSync    bool  // skip fsync on WAL writes - for ephemeral data where crash-loss is acceptable
 	Logger            *slog.Logger
 	Compaction        compaction.Config
 }
@@ -196,7 +197,7 @@ func (db *DB) recover() error {
 	}
 
 	if db.active != nil {
-		w, err := wal.Open(db.opts.Dir, db.active.ID())
+		w, err := wal.Open(db.opts.Dir, db.active.ID(), db.opts.DisableWALSync)
 		if err != nil {
 			return fmt.Errorf("reopen active WAL: %w", err)
 		}
@@ -209,7 +210,7 @@ func (db *DB) recover() error {
 func (db *DB) newMemtable() error {
 	id := db.nextMemID.Add(1)
 
-	w, err := wal.Create(db.opts.Dir, id)
+	w, err := wal.Create(db.opts.Dir, id, db.opts.DisableWALSync)
 	if err != nil {
 		return fmt.Errorf("db: create WAL: %w", err)
 	}

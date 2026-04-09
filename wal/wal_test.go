@@ -17,7 +17,7 @@ func tempDir(t *testing.T) string {
 func TestWAL_PutAndRecover(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestWAL_PutAndRecover(t *testing.T) {
 func TestWAL_DeleteAndRecover(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestWAL_DeleteAndRecover(t *testing.T) {
 func TestWAL_EmptyValue(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestWAL_EmptyValue(t *testing.T) {
 func TestWAL_BatchWrite(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestWAL_BatchWrite(t *testing.T) {
 func TestWAL_SeqNumberPreserved(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestWAL_SeqNumberPreserved(t *testing.T) {
 func TestWAL_RecoverCorruptTail(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestWAL_RecoverCorruptTail(t *testing.T) {
 func TestWAL_RecoverTruncatedRecord(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestWAL_RecoverTruncatedRecord(t *testing.T) {
 func TestWAL_RecoverEmpty(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestWAL_RecoverEmpty(t *testing.T) {
 func TestWAL_Remove(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestWAL_FindFiles(t *testing.T) {
 	dir := tempDir(t)
 
 	for _, id := range []uint64{3, 1, 5} {
-		w, err := Create(dir, id)
+		w, err := Create(dir, id, false)
 		if err != nil {
 			t.Fatalf("Create(%d): %v", id, err)
 		}
@@ -355,7 +355,7 @@ func TestWAL_FindFiles_NonExistentDir(t *testing.T) {
 func TestWAL_RecoverDir(t *testing.T) {
 	dir := tempDir(t)
 
-	w1, err := Create(dir, 1)
+	w1, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create(1): %v", err)
 	}
@@ -363,7 +363,7 @@ func TestWAL_RecoverDir(t *testing.T) {
 	w1.Put([]byte("b"), []byte("2"), 2)
 	w1.Close()
 
-	w3, err := Create(dir, 3)
+	w3, err := Create(dir, 3, false)
 	if err != nil {
 		t.Fatalf("Create(3): %v", err)
 	}
@@ -416,7 +416,7 @@ func TestWAL_RecoverDir_Empty(t *testing.T) {
 func TestWAL_ManyEntries(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestWAL_ManyEntries(t *testing.T) {
 func TestWAL_LargeValues(t *testing.T) {
 	dir := tempDir(t)
 
-	w, err := Create(dir, 1)
+	w, err := Create(dir, 1, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -484,6 +484,37 @@ func TestWAL_LargeValues(t *testing.T) {
 			t.Fatalf("value mismatch at byte %d", i)
 		}
 	}
+}
+
+func TestWAL_NoSync(t *testing.T) {
+	dir := tempDir(t)
+
+	w, err := Create(dir, 1, true)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := w.Put([]byte("a"), []byte("1"), 1); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := w.Put([]byte("b"), []byte("2"), 2); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	entries, err := Recover(w.Path())
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("recovered %d entries, want 2", len(entries))
+	}
+
+	assertEntry(t, entries[0], 1, "a", "1", false)
+	assertEntry(t, entries[1], 2, "b", "2", false)
 }
 
 // --- helpers ---

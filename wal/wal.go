@@ -15,8 +15,9 @@ import (
 // Each WAL file is associated with exactly one memtable via its ID.
 // When a memtable is flushed to an SSTable, its WAL file is deleted.
 type WAL struct {
-	file *os.File
-	path string
+	file   *os.File
+	path   string
+	noSync bool
 }
 
 // walFileName returns the WAL file name for a given memtable ID.
@@ -27,8 +28,9 @@ func walFileName(id uint64) string {
 // Create creates a new WAL file for the given memtable ID in dir.
 // Durability is ensured by explicit Sync calls after each write,
 // rather than O_SYNC, so that batch writes only pay the sync
-// cost once per record.
-func Create(dir string, id uint64) (*WAL, error) {
+// cost once per record. When noSync is true, Sync calls are skipped
+// entirely - suitable for ephemeral data where crash-loss is acceptable.
+func Create(dir string, id uint64, noSync bool) (*WAL, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("wal: create directory: %w", err)
 	}
@@ -39,18 +41,18 @@ func Create(dir string, id uint64) (*WAL, error) {
 		return nil, fmt.Errorf("wal: create file: %w", err)
 	}
 
-	return &WAL{file: f, path: path}, nil
+	return &WAL{file: f, path: path, noSync: noSync}, nil
 }
 
 // Open opens an existing WAL file for appending.
-func Open(dir string, id uint64) (*WAL, error) {
+func Open(dir string, id uint64, noSync bool) (*WAL, error) {
 	path := filepath.Join(dir, walFileName(id))
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
 		return nil, fmt.Errorf("wal: open file: %w", err)
 	}
 
-	return &WAL{file: f, path: path}, nil
+	return &WAL{file: f, path: path, noSync: noSync}, nil
 }
 
 // Put writes a single key-value entry to the WAL and syncs to disk.
@@ -81,8 +83,10 @@ func (w *WAL) WriteEntries(entries []Entry) error {
 		return fmt.Errorf("wal: write: %w", err)
 	}
 
-	if err := w.file.Sync(); err != nil {
-		return fmt.Errorf("wal: sync: %w", err)
+	if !w.noSync {
+		if err := w.file.Sync(); err != nil {
+			return fmt.Errorf("wal: sync: %w", err)
+		}
 	}
 
 	return nil
