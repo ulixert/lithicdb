@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/ulixert/theseon/cluster/hintedhandoff"
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hashring"
 	"github.com/ulixert/theseon/hlc"
@@ -49,6 +50,7 @@ type Coordinator struct {
 	clock      *hlc.Clock
 	localDB    *db.DB
 	dialer     ReplicaDialer
+	hintStore  *hintedhandoff.Store
 	logger     *slog.Logger
 }
 
@@ -77,6 +79,12 @@ func NewCoordinator(
 		dialer:     dialer,
 		logger:     logger,
 	}
+}
+
+// SetHintStore attaches a hint store for hinted handoff. When set,
+// writes to dead replicas are buffered for later replay.
+func (c *Coordinator) SetHintStore(hs *hintedhandoff.Store) {
+	c.hintStore = hs
 }
 
 // Write replicates a key-value pair to N replicas and waits for W acks.
@@ -130,7 +138,13 @@ func (c *Coordinator) writeInternal(ctx context.Context, key, value []byte, dele
 			} else if c.membership.IsRoutable(node.ID) {
 				writeErr = c.remoteWrite(ctx, node.Addr, key, value, ts, deleted)
 			} else {
-				// Dead node - hinted handoff will catch this.
+				// Dead node - store hint for later replay.
+				if c.hintStore != nil {
+					if hintErr := c.hintStore.Add(node.ID, key, encoded, ts); hintErr != nil {
+						c.logger.Warn("failed to store hint",
+							"node", node.ID, "err", hintErr)
+					}
+				}
 				writeErr = fmt.Errorf("node %s is not routable", node.ID)
 				c.logger.Warn("replica not routable, skipping write",
 					"node", node.ID, "key_len", len(key))
