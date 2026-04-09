@@ -104,3 +104,133 @@ func NewDrainer(cfg DrainerConfig) *Drainer {
 		stopCh:   make(chan struct{}),
 	}
 }
+
+// Start begins the periodic sweep ticker.
+func (d *Drainer) Start() {
+	d.wg.Add(1)
+	go d.sweepLoop()
+}
+
+// TriggerDrain initiates a non-blocking drain for the given target node.
+// If a drain is already in progress for this target, the call is a no-op.
+func (d *Drainer) TriggerDrain(nodeID string) {
+	d.mu.Lock()
+	if _, ok := d.draining[nodeID]; ok {
+		d.mu.Unlock()
+		return
+	}
+	d.draining[nodeID] = struct{}{}
+	d.mu.Unlock()
+
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		defer func() {
+			d.mu.Lock()
+			delete(d.draining, nodeID)
+			d.mu.Unlock()
+		}()
+		d.drainTarget(nodeID)
+	}()
+}
+
+// Stop stops the sweep and waits for in-flight drains to complete.
+func (d *Drainer) Stop() {
+	close(d.stopCh)
+	d.wg.Wait()
+}
+
+// sweepLoop runs periodically to purge expired hints and retrigger
+// drains for targets that are now alive.
+func (d *Drainer) sweepLoop() {
+	defer d.wg.Done()
+
+	ticker := time.NewTicker(d.cfg.SweepInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
+			d.sweep()
+		}
+	}
+}
+
+func (d *Drainer) sweep() {
+	targets := d.cfg.Store.Targets()
+
+	for _, nodeID := range targets {
+		// TTL purge: delete expired hints regardless of liveness.
+		d.purgeExpired(nodeID)
+
+		// Membership gate: only trigger drain if target is Alive.
+		if d.cfg.Membership.IsAlive(nodeID) {
+			d.TriggerDrain(nodeID)
+		}
+	}
+}
+
+// drainTarget replays all hints for a single target node.
+func (d *Drainer) drainTarget(nodeID string) {
+	addr := d.resolveAddr(nodeID)
+	if addr == "" {
+		d.cfg.Logger.Warn("cannot resolve address for drain target", "node", nodeID)
+		return
+	}
+
+	for {
+		select {
+		case <-d.stopCh:
+			return
+		default:
+		}
+
+		batch := d.collectBatch(nodeID)
+		if len(batch) == 0 {
+			// No more hints for this target - clean up index.
+			d.cfg.Store.RemoveTarget(nodeID)
+			return
+		}
+
+		if err := d.replayBatch(addr, batch); err != nil {
+			d.cfg.Logger.Warn("hint replay failed", "node", nodeID, "err", err)
+			// Retry with backoff
+			if !d.retryReplay(addr, batch) {
+				d.cfg.Logger.Warn("giving up hint replay after retries", "node", nodeID)
+				return
+			}
+		}
+
+		// Delete replayed hints from the store.
+		for _, h := range batch {
+			if err := d.cfg.Store.Remove(h.hintKey, h.envSize); err != nil {
+				d.cfg.Logger.Warn("failed to remove replayed hint", "err", err)
+			}
+		}
+	}
+}
+
+type hintEntry struct {
+	hintKey []byte
+	userKey []byte
+	value   []byte // raw encoded envelope
+	envSize int64
+	ts      hlc.Timestamp
+	deleted bool
+}
+
+// collectBatch reads up to MaxBatchBytes / MaxBatchItems hints for a target.
+func (d *Drainer) collectBatch(nodeID string) []hintEntry {
+
+}
+
+func (d *Drainer) resolveAddr(nodeID string) string {
+	for _, m := range d.cfg.Membership.GetMemberInfos() {
+		if m.NodeID == nodeID {
+			return m.Addr
+		}
+	}
+	return ""
+}
