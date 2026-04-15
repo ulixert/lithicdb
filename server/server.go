@@ -105,9 +105,10 @@ func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server 
 
 	if cfg.membership != nil {
 		pb.RegisterInternalServiceServer(gs, &internalServer{
-			membership: cfg.membership,
-			clock:      cfg.clock,
-			db:         cfg.database,
+			membership:  cfg.membership,
+			clock:       cfg.clock,
+			db:          cfg.database,
+			vectorStore: cfg.vectorStore,
 		})
 	}
 
