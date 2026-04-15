@@ -15,6 +15,35 @@ import (
 
 var ErrCapacityExceeded = errors.New("hinted handoff: capacity exceeded")
 
+// Hint type constants for type-tagged hint values. The first byte of the
+// stored hint value identifies the hint type. KV hints don't have a type
+// prefix (backward compatible - first byte is the envelope version, currently 1).
+// Vector hints use high-byte prefixes (0xF0+) to avoid colliding with
+// envelope versions.
+const (
+	HintKV           byte = 0x00 // not stored; inferred when the first byte isn't a vector type
+	HintVectorWrite  byte = 0xF1
+	HintVectorDelete byte = 0xF2
+)
+
+// ParseHintType extracts the hint type from a stored hint value.
+// Returns the type byte and the payload (value without the type prefix).
+// For backward compatibility, values that don't start with a known type
+// byte are treated as KV hints (the entire value is the payload).
+func ParseHintType(value []byte) (byte, []byte) {
+	if len(value) == 0 {
+		return HintKV, value
+	}
+	switch value[0] {
+	case HintVectorWrite, HintVectorDelete:
+		return value[0], value[1:]
+	default:
+		// Existing KV hints don't have a type prefix - the first byte
+		// is the envelope version (currently 1). Treat as KV.
+		return HintKV, value
+	}
+}
+
 const (
 	DefaultMaxBytes = 256 * 1024 * 1024 // 256MB
 	DefaultHintTTL  = 24 * time.Hour
