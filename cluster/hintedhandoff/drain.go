@@ -46,6 +46,11 @@ type DecodedEnvelope struct {
 // EnvelopeDecoder decodes raw envelope bytes into structured fields.
 type EnvelopeDecoder func([]byte) (DecodedEnvelope, error)
 
+// VectorReplayFunc replays a single vector hint to a target replica.
+// The payload is the proto-serialized ReplicateVectorWriteRequest or
+// ReplicateVectorDeleteRequest (without the type prefix byte).
+type VectorReplayFunc func(ctx context.Context, client pb.InternalServiceClient, payload []byte) error
+
 // DrainerConfig configures the hint drainer.
 type DrainerConfig struct {
 	Store          *Store
@@ -58,6 +63,10 @@ type DrainerConfig struct {
 	MaxRetries     int           // default 3
 	RetryDelay     time.Duration // default 30s
 	Logger         *slog.Logger
+
+	// Vector hint replay callbacks (nil = skip vector hints).
+	VectorWriteReplay  VectorReplayFunc
+	VectorDeleteReplay VectorReplayFunc
 }
 
 func (c *DrainerConfig) defaults() {
@@ -249,12 +258,13 @@ func (d *Drainer) drainTarget(nodeID string) {
 }
 
 type hintEntry struct {
-	hintKey []byte
-	userKey []byte
-	value   []byte // raw encoded envelope
-	envSize int64
-	ts      hlc.Timestamp
-	deleted bool
+	hintKey  []byte
+	userKey  []byte
+	value    []byte // raw value for KV hints, proto payload for vector hints
+	envSize  int64
+	ts       hlc.Timestamp
+	deleted  bool
+	hintType byte // HintKV, HintVectorWrite, HintVectorDelete
 }
 
 // collectBatch reads up to MaxBatchBytes / MaxBatchItems hints for a target.
@@ -291,24 +301,39 @@ func (d *Drainer) collectBatch(nodeID string) []hintEntry {
 			continue
 		}
 
-		// Decode the envelope to extract the deleted flag for the RPC.
-		envelope, err := d.cfg.DecodeEnvelope(envData)
-		if err != nil {
-			d.cfg.Logger.Warn("corrupt hint envelope, will delete", "err", err)
-			expired = append(expired, expiredEntry{key: hintKey, envSize: envSize})
-			iter.Next()
-			continue
-		}
-
+		// Check hint type (vector vs KV).
+		ht, payload := ParseHintType(envData)
 		userKey := ExtractUserKey(hintKey)
-		batch = append(batch, hintEntry{
-			hintKey: hintKey,
-			userKey: userKey,
-			value:   envelope.Value,
-			envSize: envSize,
-			ts:      envelope.Timestamp,
-			deleted: envelope.Deleted,
-		})
+
+		if ht == HintVectorWrite || ht == HintVectorDelete {
+			// Vector hint: payload is proto-serialized, no envelope decode needed.
+			batch = append(batch, hintEntry{
+				hintKey:  hintKey,
+				userKey:  userKey,
+				value:    payload,
+				envSize:  envSize,
+				ts:       ts, // from hint key
+				hintType: ht,
+			})
+		} else {
+			// KV hint: decode the envelope to extract the deleted flag for the RPC.
+			envelope, err := d.cfg.DecodeEnvelope(envData)
+			if err != nil {
+				d.cfg.Logger.Warn("corrupt hint envelope, will delete", "err", err)
+				expired = append(expired, expiredEntry{key: hintKey, envSize: envSize})
+				iter.Next()
+				continue
+			}
+			batch = append(batch, hintEntry{
+				hintKey:  hintKey,
+				userKey:  userKey,
+				value:    envelope.Value,
+				envSize:  envSize,
+				ts:       envelope.Timestamp,
+				deleted:  envelope.Deleted,
+				hintType: HintKV,
+			})
+		}
 		batchBytes += envSize
 		iter.Next()
 	}
@@ -324,34 +349,97 @@ func (d *Drainer) collectBatch(nodeID string) []hintEntry {
 	return batch
 }
 
-// replayBatch sends a batch of hints to the target node via ReplicateWriteBatch.
+// replayBatch sends a batch of hints to the target node.
+// KV hints go via ReplicateWriteBatch. Vector hints are replayed per-hint
+// via the injected callbacks. Both types are replayed concurrently.
 func (d *Drainer) replayBatch(addr string, batch []hintEntry) error {
 	client, err := d.cfg.Dialer.GetClient(addr)
 	if err != nil {
 		return err
 	}
 
-	entries := make([]*pb.ReplicateWriteRequest, len(batch))
-	for i, h := range batch {
-		entries[i] = &pb.ReplicateWriteRequest{
-			Key:   h.userKey,
-			Value: h.value,
-			Timestamp: &pb.HLCTimestamp{
-				WallTime: h.ts.WallTime,
-				Logical:  h.ts.Logical,
-				NodeId:   h.ts.NodeID,
-			},
-			Deleted: h.deleted,
+	// Split batch by hint type.
+	var kvEntries []*pb.ReplicateWriteRequest
+	var vectorHints []hintEntry
+	for _, h := range batch {
+		switch h.hintType {
+		case HintVectorWrite, HintVectorDelete:
+			vectorHints = append(vectorHints, h)
+		default:
+			kvEntries = append(kvEntries, &pb.ReplicateWriteRequest{
+				Key:   h.userKey,
+				Value: h.value,
+				Timestamp: &pb.HLCTimestamp{
+					WallTime: h.ts.WallTime,
+					Logical:  h.ts.Logical,
+					NodeId:   h.ts.NodeID,
+				},
+				Deleted: h.deleted,
+			})
 		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err = client.ReplicateWriteBatch(ctx, &pb.ReplicateWriteBatchRequest{
-		Entries: entries,
-	})
-	return err
+	// Replay KV and vector hints concurrently.
+	var wg sync.WaitGroup
+	var kvErr, vectorErr error
+
+	if len(kvEntries) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, kvErr = client.ReplicateWriteBatch(ctx, &pb.ReplicateWriteBatchRequest{
+				Entries: kvEntries,
+			})
+		}()
+	}
+
+	if len(vectorHints) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			vectorErr = d.replayVectorHints(ctx, client, vectorHints)
+		}()
+	}
+
+	wg.Wait()
+
+	if kvErr != nil {
+		return kvErr
+	}
+	return vectorErr
+}
+
+// replayVectorHints replays vector hints one at a time via the injected callbacks.
+func (d *Drainer) replayVectorHints(ctx context.Context, client pb.InternalServiceClient, hints []hintEntry) error {
+	for _, h := range hints {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		var replayFn VectorReplayFunc
+		switch h.hintType {
+		case HintVectorWrite:
+			replayFn = d.cfg.VectorWriteReplay
+		case HintVectorDelete:
+			replayFn = d.cfg.VectorDeleteReplay
+		}
+
+		if replayFn == nil {
+			d.cfg.Logger.Warn("no replay func for vector hint, skipping",
+				"type", h.hintType)
+			continue
+		}
+
+		if err := replayFn(ctx, client, h.value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // retryReplay retries the batch replay with backoff.
