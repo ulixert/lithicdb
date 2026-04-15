@@ -3,8 +3,12 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	"github.com/ulixert/theseon/hashring"
 	"github.com/ulixert/theseon/hlc"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -66,3 +70,176 @@ func hlcToVersion(ts hlc.Timestamp) VectorVersion {
 }
 
 const defaultOversample = 4
+
+// VectorWrite replicates a vector put to N replicas using the collection name
+// as the ring key (all vectors in a collection land on the same N replicas).
+func (c *Coordinator) VectorWrite(ctx context.Context, collection string, id [16]byte, vec []float32, meta Metadata) error {
+	if c.vectorStore == nil {
+		return ErrNoVectorStore
+	}
+
+	ts := c.clock.Now()
+	ver := hlcToVersion(ts)
+
+	digest, err := c.vectorStore.ConfigDigest(collection)
+	if err != nil {
+		return fmt.Errorf("config digest: %w", err)
+	}
+
+	replicas := c.ring.GetNodes([]byte(collection), c.cfg.ReplicationFactor)
+	if len(replicas) < c.cfg.WriteQuorum {
+		return fmt.Errorf("%w: have %d, need %d", ErrNotEnoughReplicas, len(replicas), c.cfg.WriteQuorum)
+	}
+
+	type ack struct {
+		nodeID string
+		err    error
+	}
+	acks := make(chan ack, len(replicas))
+
+	for _, replica := range replicas {
+		go func(node hashring.Node) {
+			var writeErr error
+			if node.ID == c.selfID {
+				writeErr = c.vectorStore.Put(collection, id, vec, meta, ver)
+			} else if c.membership.IsRoutable(node.ID) {
+				writeErr = c.remoteVectorWrite(ctx, node.Addr, collection, id, vec, meta, ts, digest)
+			} else {
+				// Dead node - store hint for later replay.
+				if c.hintStore != nil {
+					hintErr := c.storeVectorWriteHint(node.ID, collection, id, vec, meta, ts, digest)
+					if hintErr != nil {
+						c.logger.Warn("failed to store vector write hint",
+							"node", node.ID, "err", hintErr)
+					}
+				}
+				writeErr = fmt.Errorf("node %s is not routable", node.ID)
+				c.logger.Warn("replica not routable, skipping vector write",
+					"node", node.ID, "collection", collection)
+			}
+			acks <- ack{node.ID, writeErr}
+		}(replica)
+	}
+
+	// Quorum counting identical to writeInternal.
+	maxFailures := len(replicas) - c.cfg.WriteQuorum + 1
+	successes := 0
+	failures := 0
+	var errs []error
+	for successes < c.cfg.WriteQuorum && failures < maxFailures {
+		a := <-acks
+		if a.err == nil {
+			successes++
+		} else {
+			failures++
+			errs = append(errs, fmt.Errorf("node %s: %w", a.nodeID, a.err))
+			c.logger.Warn("replica vector write failed", "node", a.nodeID, "err", a.err)
+		}
+	}
+
+	if successes >= c.cfg.WriteQuorum {
+		return nil
+	}
+	return fmt.Errorf("%w: got %d/%d acks: %w",
+		ErrWriteQuorumNotMet, successes, c.cfg.WriteQuorum, errors.Join(errs...))
+}
+
+// remoteVectorWrite sends a ReplicateVectorWrite RPC to a single replica.
+func (c *Coordinator) remoteVectorWrite(
+	ctx context.Context, addr string,
+	collection string, id [16]byte, vec []float32, meta Metadata,
+	ts hlc.Timestamp, digest uint64,
+) error {
+	client, err := c.dialer.GetClient(addr)
+	if err != nil {
+		return err
+	}
+	rctx, cancel := context.WithTimeout(ctx, c.cfg.PerReplicaTimeout)
+	defer cancel()
+
+	_, err = client.ReplicateVectorWrite(rctx, &pb.ReplicateVectorWriteRequest{
+		Collection:   collection,
+		Id:           id[:],
+		Vector:       vec,
+		Metadata:     metadataToProto(meta),
+		Timestamp:    hlcToProto(ts),
+		ConfigDigest: digest,
+	})
+	return err
+}
+
+// storeVectorWriteHint stores a vector write hint for a dead replica.
+func (c *Coordinator) storeVectorWriteHint(
+	nodeID string, collection string, id [16]byte, vec []float32, meta Metadata,
+	ts hlc.Timestamp, digest uint64,
+) error {
+	if c.hintStore == nil {
+		return nil
+	}
+	req := &pb.ReplicateVectorWriteRequest{
+		Collection:   collection,
+		Id:           id[:],
+		Vector:       vec,
+		Metadata:     metadataToProto(meta),
+		Timestamp:    hlcToProto(ts),
+		ConfigDigest: digest,
+	}
+	payload, err := marshalProto(req)
+	if err != nil {
+		return err
+	}
+	// Prepend hint type byte.
+	hintValue := make([]byte, 1+len(payload))
+	hintValue[0] = HintVectorWrite
+	copy(hintValue[1:], payload)
+
+	// Use collection name as the hint key (for grouping).
+	return c.hintStore.Add(nodeID, []byte(collection), hintValue, ts)
+}
+
+// metadataToProto converts Metadata to the proto map<string, bytes> representation.
+func metadataToProto(meta Metadata) map[string][]byte {
+	if meta == nil {
+		return nil
+	}
+	result := make(map[string][]byte, len(meta))
+	for k, v := range meta {
+		switch val := v.(type) {
+		case string:
+			result[k] = []byte(val)
+		case []byte:
+			result[k] = val
+		default:
+			// For other types, skip for now - the server adapter
+			// should handle full type-aware serialization.
+			c := fmt.Sprintf("%v", val)
+			result[k] = []byte(c)
+		}
+	}
+	return result
+}
+
+// hlcToProto converts an HLC timestamp to its proto representation.
+func hlcToProto(ts hlc.Timestamp) *pb.HLCTimestamp {
+	return &pb.HLCTimestamp{
+		WallTime: ts.WallTime,
+		Logical:  ts.Logical,
+		NodeId:   ts.NodeID,
+	}
+}
+
+// marshalProto marshals a proto message to bytes.
+func marshalProto(msg protoMessage) ([]byte, error) {
+	return proto.Marshal(msg)
+}
+
+// protoMessage is satisfied by all generated proto message types.
+type protoMessage = proto.Message
+
+// Hint type constants for type-tagged hint values.
+// Must match the constants in hintedhandoff/store.go.
+const (
+	HintKV           byte = 0x00
+	HintVectorWrite  byte = 0xF1
+	HintVectorDelete byte = 0xF2
+)
