@@ -1,9 +1,11 @@
 package cluster
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/ulixert/theseon/hashring"
 	"github.com/ulixert/theseon/hlc"
@@ -209,6 +211,170 @@ func (c *Coordinator) VectorDelete(ctx context.Context, collection string, id [1
 	}
 	return fmt.Errorf("%w: got %d/%d acks: %w",
 		ErrWriteQuorumNotMet, successes, c.cfg.WriteQuorum, errors.Join(errs...))
+}
+
+// VectorSearch fans out to all readable replicas, requires R successes,
+// merges all responses, deduplicates, exact-reranks, and validates results.
+func (c *Coordinator) VectorSearch(
+	ctx context.Context,
+	collection string,
+	query []float32,
+	k int,
+	oversample int,
+	efSearch int,
+) ([]VectorSearchResult, error) {
+	if c.vectorStore == nil {
+		return nil, ErrNoVectorStore
+	}
+
+	if oversample <= 0 {
+		oversample = defaultOversample
+	}
+	perReplicaK := k * oversample
+
+	replicas := c.ring.GetNodes([]byte(collection), c.cfg.ReplicationFactor)
+
+	// Filter to readable replicas.
+	var readable []hashring.Node
+	for _, r := range replicas {
+		if c.membership.IsRoutable(r.ID) && c.membership.RingStateOf(r.ID) != RingJoining {
+			readable = append(readable, r)
+		}
+	}
+	if len(readable) < c.cfg.ReadQuorum {
+		return nil, fmt.Errorf("%w: have %d readable, need %d",
+			ErrVectorSearchFailed, len(readable), c.cfg.ReadQuorum)
+	}
+
+	digest, _ := c.vectorStore.ConfigDigest(collection)
+
+	// Fan out to ALL readable replicas.
+	type replicaResult struct {
+		nodeID  string
+		results []VectorSearchResult
+		err     error
+	}
+	ch := make(chan replicaResult, len(readable))
+
+	for _, replica := range readable {
+		go func(node hashring.Node) {
+			var res []VectorSearchResult
+			var searchErr error
+			if node.ID == c.selfID {
+				res, searchErr = c.vectorStore.Search(ctx, collection, query, perReplicaK, efSearch)
+			} else {
+				res, searchErr = c.remoteVectorSearch(ctx, node.Addr, collection, query, perReplicaK, efSearch, digest)
+			}
+			ch <- replicaResult{node.ID, res, searchErr}
+		}(replica)
+	}
+
+	// Require R successes, but merge ALL responses received before deadline.
+	totalCap := len(readable) * perReplicaK
+	allResults := make([]VectorSearchResult, 0, totalCap)
+	successes := 0
+	failures := 0
+	maxFailures := len(readable) - c.cfg.ReadQuorum + 1
+	var errs []error
+
+	// Phase 1: wait for quorum.
+	for successes < c.cfg.ReadQuorum && failures < maxFailures {
+		r := <-ch
+		if r.err != nil {
+			failures++
+			errs = append(errs, fmt.Errorf("node %s: %w", r.nodeID, r.err))
+		} else {
+			successes++
+			allResults = append(allResults, r.results...)
+		}
+	}
+
+	if successes < c.cfg.ReadQuorum {
+		return nil, fmt.Errorf("%w: got %d/%d: %v",
+			ErrVectorSearchFailed, successes, c.cfg.ReadQuorum, errors.Join(errs...))
+	}
+
+	// Phase 2: drain remaining results (non-blocking).
+	remaining := len(readable) - successes - failures
+	for range remaining {
+		select {
+		case r := <-ch:
+			if r.err == nil {
+				allResults = append(allResults, r.results...)
+			}
+		default:
+			// no more results ready
+		}
+	}
+
+	// Deduplicate by UUID - keep highest version.
+	seen := make(map[[16]byte]int, totalCap)
+	deduped := make([]VectorSearchResult, 0, len(allResults))
+	for _, r := range allResults {
+		if idx, ok := seen[r.ID]; ok {
+			if r.Version.After(deduped[idx].Version) {
+				deduped[idx] = r
+			}
+		} else {
+			seen[r.ID] = len(deduped)
+			deduped = append(deduped, r)
+		}
+	}
+
+	// Exact rerank with the collection's distance function.
+	distFn, err := c.vectorStore.DistanceFunc(collection)
+	if err != nil {
+		return nil, fmt.Errorf("get distance func: %w", err)
+	}
+	for i := range deduped {
+		deduped[i].Distance = distFn(query, deduped[i].Vector)
+	}
+
+	// Sort by distance ascending.
+	slices.SortFunc(deduped, func(a, b VectorSearchResult) int {
+		return cmp.Compare(a.Distance, b.Distance)
+	})
+
+	// Post-merge validation: walk candidates, validate against local state.
+	validated := make([]VectorSearchResult, 0, k)
+	for i := range deduped {
+		if len(validated) >= k {
+			break
+		}
+		r := &deduped[i]
+		latest, err := c.vectorStore.GetLatest(collection, r.ID)
+		if err != nil {
+			// Can't validate - include as-is.
+			validated = append(validated, *r)
+			continue
+		}
+		if !latest.Found {
+			// Not in local KV - include (might be on other replicas only).
+			validated = append(validated, *r)
+			continue
+		}
+		if latest.Version.After(r.Version) {
+			if latest.Deleted {
+				continue // locally known to be deleted, skip
+			}
+			// Locally has a newer live version - substitute.
+			r.Vector = latest.Vector
+			r.Distance = distFn(query, latest.Vector)
+			r.Version = latest.Version
+		}
+		validated = append(validated, *r)
+	}
+
+	// Re-sort after substitutions (some distances may have changed).
+	slices.SortFunc(validated, func(a, b VectorSearchResult) int {
+		return cmp.Compare(a.Distance, b.Distance)
+	})
+
+	if len(validated) > k {
+		validated = validated[:k]
+	}
+
+	return validated, nil
 }
 
 // remoteVectorWrite sends a ReplicateVectorWrite RPC to a single replica.
