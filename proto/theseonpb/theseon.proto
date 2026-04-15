@@ -12,10 +12,16 @@ service Theseon {
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc Scan(ScanRequest) returns (stream ScanResponse);
   rpc BatchWrite(BatchWriteRequest) returns (BatchWriteResponse);
+
+  // Vector operations
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
+  rpc VectorPut(VectorPutRequest) returns (VectorPutResponse);
+  rpc VectorDelete(VectorDeleteRequest) returns (VectorDeleteResponse);
+  rpc VectorSearch(VectorSearchRequest) returns (VectorSearchResponse);
 }
 
 message PutRequest {
-  bytes key   = 1;
+  bytes key = 1;
   bytes value = 2;
 }
 
@@ -39,7 +45,7 @@ message DeleteResponse {}
 message ScanRequest {}
 
 message ScanResponse {
-  bytes key   = 1;
+  bytes key = 1;
   bytes value = 2;
 }
 
@@ -48,8 +54,8 @@ message BatchWriteRequest {
 }
 
 message BatchEntry {
-  bytes key       = 1;
-  bytes value     = 2;
+  bytes key = 1;
+  bytes value = 2;
   bool  is_delete = 3;
 }
 
@@ -67,18 +73,23 @@ service InternalService {
   rpc ReplicateWrite(ReplicateWriteRequest) returns (ReplicateWriteResponse);
   rpc ReplicateWriteBatch(ReplicateWriteBatchRequest) returns (ReplicateWriteBatchResponse);
   rpc ReplicateRead(ReplicateReadRequest) returns (ReplicateReadResponse);
+
+  // Vector replication RPCs
+  rpc ReplicateVectorWrite(ReplicateVectorWriteRequest) returns (ReplicateVectorWriteResponse);
+  rpc ReplicateVectorDelete(ReplicateVectorDeleteRequest) returns (ReplicateVectorDeleteResponse);
+  rpc ReplicateVectorSearch(ReplicateVectorSearchRequest) returns (ReplicateVectorSearchResponse);
 }
 
 // SWIM Ping - direct probe with piggybacked gossip updates and ring descriptor.
 message PingRequest {
-  string sender_id   = 1;
+  string sender_id = 1;
   string sender_addr = 2;
   repeated MemberUpdateProto updates = 3;
   RingDescriptorProto ring_descriptor = 4;  // piggybacked for fast convergence
 }
 
 message PingResponse {
-  string sender_id   = 1;
+  string sender_id = 1;
   string sender_addr = 2;
   repeated MemberUpdateProto updates = 3;
   RingDescriptorProto ring_descriptor = 4;  // piggybacked for fast convergence
@@ -86,7 +97,7 @@ message PingResponse {
 
 // SWIM PingReq - indirect probe: ask an intermediary to ping the target.
 message PingReqRequest {
-  string target_id   = 1;
+  string target_id = 1;
   string target_addr = 2;
 }
 
@@ -96,7 +107,7 @@ message PingReqResponse {
 
 // GossipSync — full membership table exchange for discovery.
 message GossipSyncRequest {
-  string sender_id   = 1;
+  string sender_id = 1;
   string sender_addr = 2;
   repeated MemberUpdateProto members = 3;
   RingDescriptorProto ring_descriptor = 4;  // include ring for full state exchange
@@ -109,10 +120,10 @@ message GossipSyncResponse {
 
 // MemberUpdateProto carries the gossip state for a single member.
 message MemberUpdateProto {
-  string node_id     = 1;
-  string addr        = 2;
-  int32  liveness    = 3;  // 0=alive, 1=suspect, 2=dead
-  int32  ring_state  = 4;  // 0=none, 1=joining, 2=active
+  string node_id = 1;
+  string addr = 2;
+  int32  liveness = 3;  // 0=alive, 1=suspect, 2=dead
+  int32  ring_state = 4;  // 0=none, 1=joining, 2=active
   uint64 incarnation = 5;
 }
 
@@ -123,8 +134,8 @@ message RingDescriptorProto {
 }
 
 message RingMemberProto {
-  string node_id    = 1;
-  string addr       = 2;
+  string node_id = 1;
+  string addr = 2;
   int32  ring_state = 3;  // 0=joining, 1=active
 }
 
@@ -132,16 +143,16 @@ message RingMemberProto {
 
 message HLCTimestamp {
   int64  wall_time = 1;  // nanoseconds since epoch
-  uint32 logical   = 2;
-  string node_id   = 3;
+  uint32 logical = 2;
+  string node_id = 3;
 }
 
 // ReplicateWrite - replica receives a write from the coordinator.
 message ReplicateWriteRequest {
-  bytes        key       = 1;
-  bytes        value     = 2;
+  bytes        key = 1;
+  bytes        value = 2;
   HLCTimestamp timestamp = 3;
-  bool         deleted   = 4;  // true = tombstone
+  bool         deleted = 4;  // true = tombstone
 }
 
 message ReplicateWriteResponse {}
@@ -159,10 +170,95 @@ message ReplicateReadRequest {
 }
 
 message ReplicateReadResponse {
-  bytes        value     = 1;
+  bytes        value = 1;
   HLCTimestamp timestamp = 2;
-  bool         found     = 3;
-  bool         deleted   = 4;
+  bool         found = 3;
+  bool         deleted = 4;
+}
+
+// ---- Vector operations (client-facing) ----
+
+message CreateCollectionRequest {
+  string name = 1;
+  int32  dim = 2;
+  uint32 metric = 3;  // 1=L2, 2=Cosine, 3=InnerProduct
+  int32  m = 4;
+  int32  ef_construct = 5;
+  int32  ef_search = 6;
+  int64  max_vectors = 7;
+}
+
+message CreateCollectionResponse {}
+
+message VectorPutRequest {
+  string              collection = 1;
+  bytes               id = 2;  // 16-byte UUID
+  repeated float      vector = 3;
+  map<string, bytes>  metadata = 4;
+}
+
+message VectorPutResponse {}
+
+message VectorDeleteRequest {
+  string collection = 1;
+  bytes  id = 2;  // 16-byte UUID
+}
+
+message VectorDeleteResponse {}
+
+message VectorSearchRequest {
+  string         collection = 1;
+  repeated float query = 2;
+  int32          k = 3;
+  int32          ef_search = 4;  // 0 = default
+  int32          oversample = 5;  // 0 = default (4). Only used by coordinator.
+}
+
+message VectorSearchResponse {
+  repeated VectorSearchResult results = 1;
+}
+
+message VectorSearchResult {
+  bytes          id = 1;  // 16-byte UUID
+  repeated float vector = 2;  // raw vector for exact reranking
+  float          distance = 3;
+  map<string, bytes> metadata = 4;
+  int64          version_wall_time = 5;  // VectorVersion for merge/dedup
+  uint32         version_logical = 6;
+}
+
+// ---- Vector replication (node-to-node) ----
+
+message ReplicateVectorWriteRequest {
+  string              collection = 1;
+  bytes               id = 2;  // 16-byte UUID
+  repeated float      vector = 3;
+  map<string, bytes>  metadata = 4;
+  HLCTimestamp        timestamp = 5;
+  uint64              config_digest = 6;
+}
+
+message ReplicateVectorWriteResponse {}
+
+message ReplicateVectorDeleteRequest {
+  string       collection = 1;
+  bytes        id = 2;  // 16-byte UUID
+  HLCTimestamp timestamp = 3;
+  uint64       config_digest = 4;
+}
+
+message ReplicateVectorDeleteResponse {}
+
+message ReplicateVectorSearchRequest {
+  string         collection = 1;
+  repeated float query = 2;
+  int32          k = 3;
+  int32          ef_search = 4;
+  uint64         config_digest = 5;
+}
+
+message ReplicateVectorSearchResponse {
+  repeated VectorSearchResult results = 1;
 }
 
 // ---- Operator topology management ----
@@ -177,9 +273,9 @@ service AdminService {
 
 message GetNodeInfoRequest {}
 message GetNodeInfoResponse {
-  string node_id    = 1;
-  string addr       = 2;
-  int32  liveness   = 3;
+  string node_id = 1;
+  string addr = 2;
+  int32  liveness = 3;
   int32  ring_state = 4;
 }
 
