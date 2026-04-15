@@ -144,6 +144,73 @@ func (c *Coordinator) VectorWrite(ctx context.Context, collection string, id [16
 		ErrWriteQuorumNotMet, successes, c.cfg.WriteQuorum, errors.Join(errs...))
 }
 
+// VectorDelete replicates a vector delete to N replicas using collection-name ring routing.
+func (c *Coordinator) VectorDelete(ctx context.Context, collection string, id [16]byte) error {
+	if c.vectorStore == nil {
+		return ErrNoVectorStore
+	}
+
+	ts := c.clock.Now()
+	ver := hlcToVersion(ts)
+
+	digest, err := c.vectorStore.ConfigDigest(collection)
+	if err != nil {
+		return fmt.Errorf("config digest: %w", err)
+	}
+
+	replicas := c.ring.GetNodes([]byte(collection), c.cfg.ReplicationFactor)
+	if len(replicas) < c.cfg.WriteQuorum {
+		return fmt.Errorf("%w: have %d, need %d", ErrNotEnoughReplicas, len(replicas), c.cfg.WriteQuorum)
+	}
+
+	type ack struct {
+		nodeID string
+		err    error
+	}
+	acks := make(chan ack, len(replicas))
+
+	for _, replica := range replicas {
+		go func(node hashring.Node) {
+			var writeErr error
+			if node.ID == c.selfID {
+				writeErr = c.vectorStore.Delete(collection, id, ver)
+			} else if c.membership.IsRoutable(node.ID) {
+				writeErr = c.remoteVectorDelete(ctx, node.Addr, collection, id, ts, digest)
+			} else {
+				if c.hintStore != nil {
+					hintErr := c.storeVectorDeleteHint(node.ID, collection, id, ts, digest)
+					if hintErr != nil {
+						c.logger.Warn("failed to store vector delete hint",
+							"node", node.ID, "err", hintErr)
+					}
+				}
+				writeErr = fmt.Errorf("node %s is not routable", node.ID)
+			}
+			acks <- ack{node.ID, writeErr}
+		}(replica)
+	}
+
+	maxFailures := len(replicas) - c.cfg.WriteQuorum + 1
+	successes := 0
+	failures := 0
+	var errs []error
+	for successes < c.cfg.WriteQuorum && failures < maxFailures {
+		a := <-acks
+		if a.err == nil {
+			successes++
+		} else {
+			failures++
+			errs = append(errs, fmt.Errorf("node %s: %w", a.nodeID, a.err))
+		}
+	}
+
+	if successes >= c.cfg.WriteQuorum {
+		return nil
+	}
+	return fmt.Errorf("%w: got %d/%d acks: %w",
+		ErrWriteQuorumNotMet, successes, c.cfg.WriteQuorum, errors.Join(errs...))
+}
+
 // remoteVectorWrite sends a ReplicateVectorWrite RPC to a single replica.
 func (c *Coordinator) remoteVectorWrite(
 	ctx context.Context, addr string,
@@ -162,6 +229,28 @@ func (c *Coordinator) remoteVectorWrite(
 		Id:           id[:],
 		Vector:       vec,
 		Metadata:     metadataToProto(meta),
+		Timestamp:    hlcToProto(ts),
+		ConfigDigest: digest,
+	})
+	return err
+}
+
+// remoteVectorDelete sends a ReplicateVectorDelete RPC to a single replica.
+func (c *Coordinator) remoteVectorDelete(
+	ctx context.Context, addr string,
+	collection string, id [16]byte,
+	ts hlc.Timestamp, digest uint64,
+) error {
+	client, err := c.dialer.GetClient(addr)
+	if err != nil {
+		return err
+	}
+	rctx, cancel := context.WithTimeout(ctx, c.cfg.PerReplicaTimeout)
+	defer cancel()
+
+	_, err = client.ReplicateVectorDelete(rctx, &pb.ReplicateVectorDeleteRequest{
+		Collection:   collection,
+		Id:           id[:],
 		Timestamp:    hlcToProto(ts),
 		ConfigDigest: digest,
 	})
@@ -194,6 +283,31 @@ func (c *Coordinator) storeVectorWriteHint(
 	copy(hintValue[1:], payload)
 
 	// Use collection name as the hint key (for grouping).
+	return c.hintStore.Add(nodeID, []byte(collection), hintValue, ts)
+}
+
+// storeVectorDeleteHint stores a vector delete hint for a dead replica.
+func (c *Coordinator) storeVectorDeleteHint(
+	nodeID string, collection string, id [16]byte,
+	ts hlc.Timestamp, digest uint64,
+) error {
+	if c.hintStore == nil {
+		return nil
+	}
+	req := &pb.ReplicateVectorDeleteRequest{
+		Collection:   collection,
+		Id:           id[:],
+		Timestamp:    hlcToProto(ts),
+		ConfigDigest: digest,
+	}
+	payload, err := marshalProto(req)
+	if err != nil {
+		return err
+	}
+	hintValue := make([]byte, 1+len(payload))
+	hintValue[0] = HintVectorDelete
+	copy(hintValue[1:], payload)
+
 	return c.hintStore.Add(nodeID, []byte(collection), hintValue, ts)
 }
 
