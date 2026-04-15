@@ -19,6 +19,7 @@ import (
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hlc"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
+	"github.com/ulixert/theseon/vector"
 	"google.golang.org/grpc"
 )
 
@@ -32,6 +33,8 @@ type Server struct {
 
 	db          *db.DB
 	coordinator *cluster.Coordinator
+	vectorStore *vector.VectorStore
+	versionGen  *localVersionGen // standalone mode version generator
 	gs          *grpc.Server
 }
 
@@ -43,6 +46,7 @@ type serverConfig struct {
 	clock       *hlc.Clock
 	database    *db.DB
 	coordinator *cluster.Coordinator
+	vectorStore *vector.VectorStore
 }
 
 // WithMembership configures the server to register the InternalService
@@ -72,6 +76,14 @@ func WithCoordinator(coord *cluster.Coordinator) Option {
 	}
 }
 
+// WithVectorStore configures the server with a vector store for
+// vector operations (CreateCollection, VectorPut, VectorDelete, VectorSearch).
+func WithVectorStore(vs *vector.VectorStore) Option {
+	return func(c *serverConfig) {
+		c.vectorStore = vs
+	}
+}
+
 // New creates a gRPC server that serves the Theseon service backed
 // by the given database. The caller retains ownership of the database
 // and must close it after stopping the server.
@@ -82,7 +94,13 @@ func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server 
 	}
 
 	gs := grpc.NewServer(grpcOpts...)
-	s := &Server{db: database, coordinator: cfg.coordinator, gs: gs}
+	s := &Server{
+		db:          database,
+		coordinator: cfg.coordinator,
+		vectorStore: cfg.vectorStore,
+		versionGen:  &localVersionGen{},
+		gs:          gs,
+	}
 	pb.RegisterTheseonServer(gs, s)
 
 	if cfg.membership != nil {
