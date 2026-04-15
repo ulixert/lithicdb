@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/ulixert/theseon/hashring"
@@ -423,6 +424,46 @@ func (c *Coordinator) remoteVectorDelete(
 	return err
 }
 
+// remoteVectorSearch sends a ReplicateVectorSearch RPC to a single replica.
+func (c *Coordinator) remoteVectorSearch(
+	ctx context.Context, addr string,
+	collection string, query []float32, k, efSearch int, digest uint64,
+) ([]VectorSearchResult, error) {
+	client, err := c.dialer.GetClient(addr)
+	if err != nil {
+		return nil, err
+	}
+	rctx, cancel := context.WithTimeout(ctx, c.cfg.PerReplicaTimeout)
+	defer cancel()
+
+	resp, err := client.ReplicateVectorSearch(rctx, &pb.ReplicateVectorSearchRequest{
+		Collection:   collection,
+		Query:        query,
+		K:            int32(k),
+		EfSearch:     int32(efSearch),
+		ConfigDigest: digest,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]VectorSearchResult, len(resp.Results))
+	for i, r := range resp.Results {
+		var id [16]byte
+		copy(id[:], r.Id)
+		results[i] = VectorSearchResult{
+			ID:       id,
+			Vector:   r.Vector,
+			Distance: r.Distance,
+			Version: VectorVersion{
+				WallTime: r.VersionWallTime,
+				Logical:  r.VersionLogical,
+			},
+		}
+	}
+	return results, nil
+}
+
 // storeVectorWriteHint stores a vector write hint for a dead replica.
 func (c *Coordinator) storeVectorWriteHint(
 	nodeID string, collection string, id [16]byte, vec []float32, meta Metadata,
@@ -523,3 +564,13 @@ const (
 	HintVectorWrite  byte = 0xF1
 	HintVectorDelete byte = 0xF2
 )
+
+// logVectorSearch is a helper for debug logging.
+func logVectorSearch(logger *slog.Logger, collection string, k int, readable int, results int) {
+	logger.Debug("vector search completed",
+		"collection", collection,
+		"k", k,
+		"readable_replicas", readable,
+		"results", results,
+	)
+}
