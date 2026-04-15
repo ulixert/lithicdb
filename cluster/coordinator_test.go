@@ -37,6 +37,16 @@ func (m *mockClient) ReplicateWriteBatch(context.Context, *pb.ReplicateWriteBatc
 	return nil, nil
 }
 
+func (m *mockClient) ReplicateVectorWrite(_ context.Context, _ *pb.ReplicateVectorWriteRequest, _ ...grpc.CallOption) (*pb.ReplicateVectorWriteResponse, error) {
+	return nil, nil
+}
+func (m *mockClient) ReplicateVectorDelete(_ context.Context, _ *pb.ReplicateVectorDeleteRequest, _ ...grpc.CallOption) (*pb.ReplicateVectorDeleteResponse, error) {
+	return nil, nil
+}
+func (m *mockClient) ReplicateVectorSearch(_ context.Context, _ *pb.ReplicateVectorSearchRequest, _ ...grpc.CallOption) (*pb.ReplicateVectorSearchResponse, error) {
+	return nil, nil
+}
+
 func (m *mockClient) ReplicateWrite(ctx context.Context, req *pb.ReplicateWriteRequest, _ ...grpc.CallOption) (*pb.ReplicateWriteResponse, error) {
 	if m.writeFn != nil {
 		return m.writeFn(ctx, req)
