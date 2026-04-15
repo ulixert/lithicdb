@@ -132,6 +132,24 @@ func (c *mockInternalClient) GossipSync(
 	return nil, nil
 }
 
+func (c *mockInternalClient) ReplicateVectorWrite(
+	_ context.Context, _ *pb.ReplicateVectorWriteRequest, _ ...grpc.CallOption,
+) (*pb.ReplicateVectorWriteResponse, error) {
+	return nil, nil
+}
+
+func (c *mockInternalClient) ReplicateVectorDelete(
+	_ context.Context, _ *pb.ReplicateVectorDeleteRequest, _ ...grpc.CallOption,
+) (*pb.ReplicateVectorDeleteResponse, error) {
+	return nil, nil
+}
+
+func (c *mockInternalClient) ReplicateVectorSearch(
+	_ context.Context, _ *pb.ReplicateVectorSearchRequest, _ ...grpc.CallOption,
+) (*pb.ReplicateVectorSearchResponse, error) {
+	return nil, nil
+}
+
 func (c *mockInternalClient) getBatches() []*pb.ReplicateWriteBatchRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()
