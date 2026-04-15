@@ -19,11 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Theseon_Put_FullMethodName        = "/theseonpb.Theseon/Put"
-	Theseon_Get_FullMethodName        = "/theseonpb.Theseon/Get"
-	Theseon_Delete_FullMethodName     = "/theseonpb.Theseon/Delete"
-	Theseon_Scan_FullMethodName       = "/theseonpb.Theseon/Scan"
-	Theseon_BatchWrite_FullMethodName = "/theseonpb.Theseon/BatchWrite"
+	Theseon_Put_FullMethodName              = "/theseonpb.Theseon/Put"
+	Theseon_Get_FullMethodName              = "/theseonpb.Theseon/Get"
+	Theseon_Delete_FullMethodName           = "/theseonpb.Theseon/Delete"
+	Theseon_Scan_FullMethodName             = "/theseonpb.Theseon/Scan"
+	Theseon_BatchWrite_FullMethodName       = "/theseonpb.Theseon/BatchWrite"
+	Theseon_CreateCollection_FullMethodName = "/theseonpb.Theseon/CreateCollection"
+	Theseon_VectorPut_FullMethodName        = "/theseonpb.Theseon/VectorPut"
+	Theseon_VectorDelete_FullMethodName     = "/theseonpb.Theseon/VectorDelete"
+	Theseon_VectorSearch_FullMethodName     = "/theseonpb.Theseon/VectorSearch"
 )
 
 // TheseonClient is the client API for Theseon service.
@@ -35,6 +39,11 @@ type TheseonClient interface {
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
 	Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ScanResponse], error)
 	BatchWrite(ctx context.Context, in *BatchWriteRequest, opts ...grpc.CallOption) (*BatchWriteResponse, error)
+	// Vector operations
+	CreateCollection(ctx context.Context, in *CreateCollectionRequest, opts ...grpc.CallOption) (*CreateCollectionResponse, error)
+	VectorPut(ctx context.Context, in *VectorPutRequest, opts ...grpc.CallOption) (*VectorPutResponse, error)
+	VectorDelete(ctx context.Context, in *VectorDeleteRequest, opts ...grpc.CallOption) (*VectorDeleteResponse, error)
+	VectorSearch(ctx context.Context, in *VectorSearchRequest, opts ...grpc.CallOption) (*VectorSearchResponse, error)
 }
 
 type theseonClient struct {
@@ -104,6 +113,46 @@ func (c *theseonClient) BatchWrite(ctx context.Context, in *BatchWriteRequest, o
 	return out, nil
 }
 
+func (c *theseonClient) CreateCollection(ctx context.Context, in *CreateCollectionRequest, opts ...grpc.CallOption) (*CreateCollectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateCollectionResponse)
+	err := c.cc.Invoke(ctx, Theseon_CreateCollection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *theseonClient) VectorPut(ctx context.Context, in *VectorPutRequest, opts ...grpc.CallOption) (*VectorPutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VectorPutResponse)
+	err := c.cc.Invoke(ctx, Theseon_VectorPut_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *theseonClient) VectorDelete(ctx context.Context, in *VectorDeleteRequest, opts ...grpc.CallOption) (*VectorDeleteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VectorDeleteResponse)
+	err := c.cc.Invoke(ctx, Theseon_VectorDelete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *theseonClient) VectorSearch(ctx context.Context, in *VectorSearchRequest, opts ...grpc.CallOption) (*VectorSearchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VectorSearchResponse)
+	err := c.cc.Invoke(ctx, Theseon_VectorSearch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TheseonServer is the server API for Theseon service.
 // All implementations must embed UnimplementedTheseonServer
 // for forward compatibility.
@@ -113,6 +162,11 @@ type TheseonServer interface {
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	Scan(*ScanRequest, grpc.ServerStreamingServer[ScanResponse]) error
 	BatchWrite(context.Context, *BatchWriteRequest) (*BatchWriteResponse, error)
+	// Vector operations
+	CreateCollection(context.Context, *CreateCollectionRequest) (*CreateCollectionResponse, error)
+	VectorPut(context.Context, *VectorPutRequest) (*VectorPutResponse, error)
+	VectorDelete(context.Context, *VectorDeleteRequest) (*VectorDeleteResponse, error)
+	VectorSearch(context.Context, *VectorSearchRequest) (*VectorSearchResponse, error)
 	mustEmbedUnimplementedTheseonServer()
 }
 
@@ -137,6 +191,18 @@ func (UnimplementedTheseonServer) Scan(*ScanRequest, grpc.ServerStreamingServer[
 }
 func (UnimplementedTheseonServer) BatchWrite(context.Context, *BatchWriteRequest) (*BatchWriteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BatchWrite not implemented")
+}
+func (UnimplementedTheseonServer) CreateCollection(context.Context, *CreateCollectionRequest) (*CreateCollectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateCollection not implemented")
+}
+func (UnimplementedTheseonServer) VectorPut(context.Context, *VectorPutRequest) (*VectorPutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method VectorPut not implemented")
+}
+func (UnimplementedTheseonServer) VectorDelete(context.Context, *VectorDeleteRequest) (*VectorDeleteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method VectorDelete not implemented")
+}
+func (UnimplementedTheseonServer) VectorSearch(context.Context, *VectorSearchRequest) (*VectorSearchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method VectorSearch not implemented")
 }
 func (UnimplementedTheseonServer) mustEmbedUnimplementedTheseonServer() {}
 func (UnimplementedTheseonServer) testEmbeddedByValue()                 {}
@@ -242,6 +308,78 @@ func _Theseon_BatchWrite_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Theseon_CreateCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCollectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TheseonServer).CreateCollection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Theseon_CreateCollection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TheseonServer).CreateCollection(ctx, req.(*CreateCollectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Theseon_VectorPut_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VectorPutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TheseonServer).VectorPut(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Theseon_VectorPut_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TheseonServer).VectorPut(ctx, req.(*VectorPutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Theseon_VectorDelete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VectorDeleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TheseonServer).VectorDelete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Theseon_VectorDelete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TheseonServer).VectorDelete(ctx, req.(*VectorDeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Theseon_VectorSearch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VectorSearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TheseonServer).VectorSearch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Theseon_VectorSearch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TheseonServer).VectorSearch(ctx, req.(*VectorSearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Theseon_ServiceDesc is the grpc.ServiceDesc for Theseon service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -265,6 +403,22 @@ var Theseon_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "BatchWrite",
 			Handler:    _Theseon_BatchWrite_Handler,
 		},
+		{
+			MethodName: "CreateCollection",
+			Handler:    _Theseon_CreateCollection_Handler,
+		},
+		{
+			MethodName: "VectorPut",
+			Handler:    _Theseon_VectorPut_Handler,
+		},
+		{
+			MethodName: "VectorDelete",
+			Handler:    _Theseon_VectorDelete_Handler,
+		},
+		{
+			MethodName: "VectorSearch",
+			Handler:    _Theseon_VectorSearch_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -277,12 +431,15 @@ var Theseon_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	InternalService_Ping_FullMethodName                = "/theseonpb.InternalService/Ping"
-	InternalService_PingReq_FullMethodName             = "/theseonpb.InternalService/PingReq"
-	InternalService_GossipSync_FullMethodName          = "/theseonpb.InternalService/GossipSync"
-	InternalService_ReplicateWrite_FullMethodName      = "/theseonpb.InternalService/ReplicateWrite"
-	InternalService_ReplicateWriteBatch_FullMethodName = "/theseonpb.InternalService/ReplicateWriteBatch"
-	InternalService_ReplicateRead_FullMethodName       = "/theseonpb.InternalService/ReplicateRead"
+	InternalService_Ping_FullMethodName                  = "/theseonpb.InternalService/Ping"
+	InternalService_PingReq_FullMethodName               = "/theseonpb.InternalService/PingReq"
+	InternalService_GossipSync_FullMethodName            = "/theseonpb.InternalService/GossipSync"
+	InternalService_ReplicateWrite_FullMethodName        = "/theseonpb.InternalService/ReplicateWrite"
+	InternalService_ReplicateWriteBatch_FullMethodName   = "/theseonpb.InternalService/ReplicateWriteBatch"
+	InternalService_ReplicateRead_FullMethodName         = "/theseonpb.InternalService/ReplicateRead"
+	InternalService_ReplicateVectorWrite_FullMethodName  = "/theseonpb.InternalService/ReplicateVectorWrite"
+	InternalService_ReplicateVectorDelete_FullMethodName = "/theseonpb.InternalService/ReplicateVectorDelete"
+	InternalService_ReplicateVectorSearch_FullMethodName = "/theseonpb.InternalService/ReplicateVectorSearch"
 )
 
 // InternalServiceClient is the client API for InternalService service.
@@ -297,6 +454,10 @@ type InternalServiceClient interface {
 	ReplicateWrite(ctx context.Context, in *ReplicateWriteRequest, opts ...grpc.CallOption) (*ReplicateWriteResponse, error)
 	ReplicateWriteBatch(ctx context.Context, in *ReplicateWriteBatchRequest, opts ...grpc.CallOption) (*ReplicateWriteBatchResponse, error)
 	ReplicateRead(ctx context.Context, in *ReplicateReadRequest, opts ...grpc.CallOption) (*ReplicateReadResponse, error)
+	// Vector replication RPCs
+	ReplicateVectorWrite(ctx context.Context, in *ReplicateVectorWriteRequest, opts ...grpc.CallOption) (*ReplicateVectorWriteResponse, error)
+	ReplicateVectorDelete(ctx context.Context, in *ReplicateVectorDeleteRequest, opts ...grpc.CallOption) (*ReplicateVectorDeleteResponse, error)
+	ReplicateVectorSearch(ctx context.Context, in *ReplicateVectorSearchRequest, opts ...grpc.CallOption) (*ReplicateVectorSearchResponse, error)
 }
 
 type internalServiceClient struct {
@@ -367,6 +528,36 @@ func (c *internalServiceClient) ReplicateRead(ctx context.Context, in *Replicate
 	return out, nil
 }
 
+func (c *internalServiceClient) ReplicateVectorWrite(ctx context.Context, in *ReplicateVectorWriteRequest, opts ...grpc.CallOption) (*ReplicateVectorWriteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplicateVectorWriteResponse)
+	err := c.cc.Invoke(ctx, InternalService_ReplicateVectorWrite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalServiceClient) ReplicateVectorDelete(ctx context.Context, in *ReplicateVectorDeleteRequest, opts ...grpc.CallOption) (*ReplicateVectorDeleteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplicateVectorDeleteResponse)
+	err := c.cc.Invoke(ctx, InternalService_ReplicateVectorDelete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalServiceClient) ReplicateVectorSearch(ctx context.Context, in *ReplicateVectorSearchRequest, opts ...grpc.CallOption) (*ReplicateVectorSearchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplicateVectorSearchResponse)
+	err := c.cc.Invoke(ctx, InternalService_ReplicateVectorSearch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InternalServiceServer is the server API for InternalService service.
 // All implementations must embed UnimplementedInternalServiceServer
 // for forward compatibility.
@@ -379,6 +570,10 @@ type InternalServiceServer interface {
 	ReplicateWrite(context.Context, *ReplicateWriteRequest) (*ReplicateWriteResponse, error)
 	ReplicateWriteBatch(context.Context, *ReplicateWriteBatchRequest) (*ReplicateWriteBatchResponse, error)
 	ReplicateRead(context.Context, *ReplicateReadRequest) (*ReplicateReadResponse, error)
+	// Vector replication RPCs
+	ReplicateVectorWrite(context.Context, *ReplicateVectorWriteRequest) (*ReplicateVectorWriteResponse, error)
+	ReplicateVectorDelete(context.Context, *ReplicateVectorDeleteRequest) (*ReplicateVectorDeleteResponse, error)
+	ReplicateVectorSearch(context.Context, *ReplicateVectorSearchRequest) (*ReplicateVectorSearchResponse, error)
 	mustEmbedUnimplementedInternalServiceServer()
 }
 
@@ -406,6 +601,15 @@ func (UnimplementedInternalServiceServer) ReplicateWriteBatch(context.Context, *
 }
 func (UnimplementedInternalServiceServer) ReplicateRead(context.Context, *ReplicateReadRequest) (*ReplicateReadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReplicateRead not implemented")
+}
+func (UnimplementedInternalServiceServer) ReplicateVectorWrite(context.Context, *ReplicateVectorWriteRequest) (*ReplicateVectorWriteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplicateVectorWrite not implemented")
+}
+func (UnimplementedInternalServiceServer) ReplicateVectorDelete(context.Context, *ReplicateVectorDeleteRequest) (*ReplicateVectorDeleteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplicateVectorDelete not implemented")
+}
+func (UnimplementedInternalServiceServer) ReplicateVectorSearch(context.Context, *ReplicateVectorSearchRequest) (*ReplicateVectorSearchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplicateVectorSearch not implemented")
 }
 func (UnimplementedInternalServiceServer) mustEmbedUnimplementedInternalServiceServer() {}
 func (UnimplementedInternalServiceServer) testEmbeddedByValue()                         {}
@@ -536,6 +740,60 @@ func _InternalService_ReplicateRead_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InternalService_ReplicateVectorWrite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateVectorWriteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).ReplicateVectorWrite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_ReplicateVectorWrite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).ReplicateVectorWrite(ctx, req.(*ReplicateVectorWriteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InternalService_ReplicateVectorDelete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateVectorDeleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).ReplicateVectorDelete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_ReplicateVectorDelete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).ReplicateVectorDelete(ctx, req.(*ReplicateVectorDeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InternalService_ReplicateVectorSearch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateVectorSearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).ReplicateVectorSearch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_ReplicateVectorSearch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).ReplicateVectorSearch(ctx, req.(*ReplicateVectorSearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InternalService_ServiceDesc is the grpc.ServiceDesc for InternalService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -566,6 +824,18 @@ var InternalService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReplicateRead",
 			Handler:    _InternalService_ReplicateRead_Handler,
+		},
+		{
+			MethodName: "ReplicateVectorWrite",
+			Handler:    _InternalService_ReplicateVectorWrite_Handler,
+		},
+		{
+			MethodName: "ReplicateVectorDelete",
+			Handler:    _InternalService_ReplicateVectorDelete_Handler,
+		},
+		{
+			MethodName: "ReplicateVectorSearch",
+			Handler:    _InternalService_ReplicateVectorSearch_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
