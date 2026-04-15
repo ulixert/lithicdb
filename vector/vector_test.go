@@ -70,7 +70,7 @@ func TestPutAndSearch(t *testing.T) {
 	ids := make([][16]byte, 100)
 	for i := range ids {
 		ids[i] = randomUUID()
-		if err := vs.Put("test", ids[i], randomVector(4), nil); err != nil {
+		if err := vs.Put("test", ids[i], randomVector(4), nil, VectorVersion{}); err != nil {
 			t.Fatalf("Put(%d): %v", i, err)
 		}
 	}
@@ -109,17 +109,17 @@ func TestDeleteAndSearch(t *testing.T) {
 	// Insert a known vector and some others.
 	target := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	targetVec := []float32{1, 0, 0, 0}
-	if err := vs.Put("test", target, targetVec, nil); err != nil {
+	if err := vs.Put("test", target, targetVec, nil, VectorVersion{}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 20; i++ {
-		if err := vs.Put("test", randomUUID(), randomVector(4), nil); err != nil {
+		if err := vs.Put("test", randomUUID(), randomVector(4), nil, VectorVersion{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// Delete the target.
-	if err := vs.Delete("test", target); err != nil {
+	if err := vs.Delete("test", target, VectorVersion{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,7 +148,7 @@ func TestDeleteIdempotent(t *testing.T) {
 	}
 
 	// Delete non-existent UUID should succeed.
-	if err := vs.Delete("test", randomUUID()); err != nil {
+	if err := vs.Delete("test", randomUUID(), VectorVersion{}); err != nil {
 		t.Errorf("Delete non-existent: %v", err)
 	}
 }
@@ -178,7 +178,7 @@ func TestRecoveryAfterReopen(t *testing.T) {
 		}
 		for i := range ids {
 			ids[i] = randomUUID()
-			if err := vs.Put("test", ids[i], randomVector(4), nil); err != nil {
+			if err := vs.Put("test", ids[i], randomVector(4), nil, VectorVersion{}); err != nil {
 				t.Fatalf("Put(%d): %v", i, err)
 			}
 		}
@@ -236,13 +236,13 @@ func TestMaxVectorsLimit(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		if err := vs.Put("test", randomUUID(), randomVector(4), nil); err != nil {
+		if err := vs.Put("test", randomUUID(), randomVector(4), nil, VectorVersion{}); err != nil {
 			t.Fatalf("Put(%d): %v", i, err)
 		}
 	}
 
 	// 11th insert should fail.
-	err = vs.Put("test", randomUUID(), randomVector(4), nil)
+	err = vs.Put("test", randomUUID(), randomVector(4), nil, VectorVersion{})
 	if err == nil {
 		t.Error("expected error at max vectors limit")
 	}
@@ -264,10 +264,10 @@ func TestUpdateSameUUID(t *testing.T) {
 	oldVec := []float32{100, 0, 0, 0}
 	newVec := []float32{0, 0, 0, 100}
 
-	if err := vs.Put("test", id, oldVec, Metadata{"version": int64(1)}); err != nil {
+	if err := vs.Put("test", id, oldVec, Metadata{"version": int64(1)}, VectorVersion{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := vs.Put("test", id, newVec, Metadata{"version": int64(2)}); err != nil {
+	if err := vs.Put("test", id, newVec, Metadata{"version": int64(2)}, VectorVersion{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -304,13 +304,13 @@ func TestUpdateDoesNotCountTowardsLimit(t *testing.T) {
 	ids := make([][16]byte, 5)
 	for i := range ids {
 		ids[i] = randomUUID()
-		if err := vs.Put("test", ids[i], randomVector(4), nil); err != nil {
+		if err := vs.Put("test", ids[i], randomVector(4), nil, VectorVersion{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// Updating an existing vector should not trigger the limit.
-	if err := vs.Put("test", ids[0], randomVector(4), nil); err != nil {
+	if err := vs.Put("test", ids[0], randomVector(4), nil, VectorVersion{}); err != nil {
 		t.Errorf("update at limit should succeed: %v", err)
 	}
 }
@@ -328,12 +328,12 @@ func TestCollectionNotFound(t *testing.T) {
 		t.Errorf("got %v, want ErrCollectionNotFound", err)
 	}
 
-	err = vs.Put("nonexistent", randomUUID(), []float32{1, 2, 3}, nil)
+	err = vs.Put("nonexistent", randomUUID(), []float32{1, 2, 3}, nil, VectorVersion{})
 	if !errors.Is(err, ErrCollectionNotFound) {
 		t.Errorf("got %v, want ErrCollectionNotFound", err)
 	}
 
-	err = vs.Delete("nonexistent", randomUUID())
+	err = vs.Delete("nonexistent", randomUUID(), VectorVersion{})
 	if !errors.Is(err, ErrCollectionNotFound) {
 		t.Errorf("got %v, want ErrCollectionNotFound", err)
 	}
@@ -376,10 +376,10 @@ func TestMultipleCollections(t *testing.T) {
 	}
 
 	for i := 0; i < 20; i++ {
-		if err := vs.Put("col4", randomUUID(), randomVector(4), nil); err != nil {
+		if err := vs.Put("col4", randomUUID(), randomVector(4), nil, VectorVersion{}); err != nil {
 			t.Fatal(err)
 		}
-		if err := vs.Put("col8", randomUUID(), randomVector(8), nil); err != nil {
+		if err := vs.Put("col8", randomUUID(), randomVector(8), nil, VectorVersion{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -418,7 +418,7 @@ func TestSearchWithMetadata(t *testing.T) {
 		"label": "important",
 		"score": 0.95,
 	}
-	if err := vs.Put("test", id, []float32{1, 0, 0, 0}, meta); err != nil {
+	if err := vs.Put("test", id, []float32{1, 0, 0, 0}, meta, VectorVersion{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -451,7 +451,7 @@ func TestConcurrentPutAndSearch(t *testing.T) {
 
 	// Pre-insert some vectors so Search doesn't hit an empty graph.
 	for i := 0; i < 10; i++ {
-		if err := vs.Put("test", randomUUID(), randomVector(4), nil); err != nil {
+		if err := vs.Put("test", randomUUID(), randomVector(4), nil, VectorVersion{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -465,7 +465,7 @@ func TestConcurrentPutAndSearch(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				if err := vs.Put("test", randomUUID(), randomVector(4), nil); err != nil {
+				if err := vs.Put("test", randomUUID(), randomVector(4), nil, VectorVersion{}); err != nil {
 					errs <- err
 					return
 				}
@@ -495,7 +495,7 @@ func TestConcurrentPutAndSearch(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 5; j++ {
 				// Delete random UUIDs — most will be no-ops (idempotent).
-				if err := vs.Delete("test", randomUUID()); err != nil {
+				if err := vs.Delete("test", randomUUID(), VectorVersion{}); err != nil {
 					errs <- err
 					return
 				}
@@ -526,7 +526,7 @@ func TestStaleCandidate_KVTombstonedDirectly(t *testing.T) {
 	// Insert a vector.
 	id := randomUUID()
 	vec := []float32{1, 0, 0, 0}
-	if err := vs.Put("test", id, vec, nil); err != nil {
+	if err := vs.Put("test", id, vec, nil, VectorVersion{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -560,7 +560,7 @@ func TestDimensionMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = vs.Put("test", randomUUID(), []float32{1, 2, 3}, nil) // dim=3, want 4
+	err = vs.Put("test", randomUUID(), []float32{1, 2, 3}, nil, VectorVersion{}) // dim=3, want 4
 	if err == nil {
 		t.Error("expected dimension mismatch error")
 	}
@@ -601,7 +601,7 @@ func TestSnapshotRecovery_Basic(t *testing.T) {
 		}
 		for i := range ids {
 			ids[i] = randomUUID()
-			if err := vs.Put("test", ids[i], randomVector(4), nil); err != nil {
+			if err := vs.Put("test", ids[i], randomVector(4), nil, VectorVersion{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -674,7 +674,7 @@ func TestSnapshotRecovery_Incremental(t *testing.T) {
 		}
 		for i := range ids1 {
 			ids1[i] = randomUUID()
-			if err := vs.Put("test", ids1[i], randomVector(4), nil); err != nil {
+			if err := vs.Put("test", ids1[i], randomVector(4), nil, VectorVersion{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -685,7 +685,7 @@ func TestSnapshotRecovery_Incremental(t *testing.T) {
 		// Insert second batch AFTER snapshot.
 		for i := range ids2 {
 			ids2[i] = randomUUID()
-			if err := vs.Put("test", ids2[i], randomVector(4), nil); err != nil {
+			if err := vs.Put("test", ids2[i], randomVector(4), nil, VectorVersion{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -755,7 +755,7 @@ func TestSnapshotRecovery_DeleteAfterSnapshot(t *testing.T) {
 		}
 		for i := range ids {
 			ids[i] = randomUUID()
-			if err := vs.Put("test", ids[i], randomVector(4), nil); err != nil {
+			if err := vs.Put("test", ids[i], randomVector(4), nil, VectorVersion{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -766,7 +766,7 @@ func TestSnapshotRecovery_DeleteAfterSnapshot(t *testing.T) {
 		// Delete some after snapshot.
 		deletedIDs = ids[:10]
 		for _, id := range deletedIDs {
-			if err := vs.Delete("test", id); err != nil {
+			if err := vs.Delete("test", id, VectorVersion{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -827,7 +827,7 @@ func TestSnapshotRecovery_UpdateAfterSnapshot(t *testing.T) {
 		for i := range ids {
 			ids[i] = randomUUID()
 			vec := []float32{100, 0, 0, 0}
-			if err := vs.Put("test", ids[i], vec, Metadata{"version": int64(1)}); err != nil {
+			if err := vs.Put("test", ids[i], vec, Metadata{"version": int64(1)}, VectorVersion{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -838,7 +838,7 @@ func TestSnapshotRecovery_UpdateAfterSnapshot(t *testing.T) {
 		// Update first 5 vectors to point near origin.
 		for i := 0; i < 5; i++ {
 			vec := []float32{0.001 * float32(i), 0, 0, 0}
-			if err := vs.Put("test", ids[i], vec, Metadata{"version": int64(2)}); err != nil {
+			if err := vs.Put("test", ids[i], vec, Metadata{"version": int64(2)}, VectorVersion{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -900,7 +900,7 @@ func TestSnapshotRecovery_CorruptFallback(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i := 0; i < n; i++ {
-			if err := vs.Put("test", randomUUID(), randomVector(4), nil); err != nil {
+			if err := vs.Put("test", randomUUID(), randomVector(4), nil, VectorVersion{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -979,7 +979,7 @@ func TestKindByteKeyDistinction(t *testing.T) {
 	}
 
 	id := randomUUID()
-	if err := vs.Put("test", id, randomVector(4), nil); err != nil {
+	if err := vs.Put("test", id, randomVector(4), nil, VectorVersion{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1001,5 +1001,320 @@ func TestKindByteKeyDistinction(t *testing.T) {
 	}
 	if vectorKind != kindVector {
 		t.Errorf("vector key kind: got 0x%02x, want 0x%02x", vectorKind, kindVector)
+	}
+}
+
+func TestPut_LWW_OlderVersionSkipped(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	if err := vs.CreateCollection("test", testCollectionConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	id := randomUUID()
+	firstVec := []float32{1, 0, 0, 0}
+	secondVec := []float32{0, 0, 0, 1}
+
+	// Put with newer version first.
+	if err := vs.Put("test", id, firstVec, Metadata{"v": int64(1)}, VectorVersion{WallTime: 200, Logical: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put with older version -- should be skipped.
+	if err := vs.Put("test", id, secondVec, Metadata{"v": int64(2)}, VectorVersion{WallTime: 100, Logical: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Search near firstVec -- should find it with original metadata.
+	results, err := vs.Search("test", firstVec, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Fatal("no results")
+	}
+	if results[0].ID != id {
+		t.Errorf("expected ID %x, got %x", id, results[0].ID)
+	}
+	if results[0].Metadata["v"] != int64(1) {
+		t.Errorf("expected metadata v=1 (first put), got %v", results[0].Metadata["v"])
+	}
+}
+
+func TestPut_LWW_NewerVersionApplied(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	if err := vs.CreateCollection("test", testCollectionConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	id := randomUUID()
+	oldVec := []float32{100, 0, 0, 0}
+	newVec := []float32{0, 0, 0, 100}
+
+	if err := vs.Put("test", id, oldVec, Metadata{"v": int64(1)}, VectorVersion{WallTime: 100, Logical: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := vs.Put("test", id, newVec, Metadata{"v": int64(2)}, VectorVersion{WallTime: 200, Logical: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := vs.Search("test", newVec, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Fatal("no results")
+	}
+	if results[0].ID != id {
+		t.Errorf("expected ID %x, got %x", id, results[0].ID)
+	}
+	if results[0].Metadata["v"] != int64(2) {
+		t.Errorf("expected metadata v=2 (newer put), got %v", results[0].Metadata["v"])
+	}
+}
+
+func TestDelete_LWW_OlderVersionSkipped(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	if err := vs.CreateCollection("test", testCollectionConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	id := randomUUID()
+	vec := []float32{1, 0, 0, 0}
+
+	// Put with newer version.
+	if err := vs.Put("test", id, vec, nil, VectorVersion{WallTime: 200, Logical: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete with older version -- should be skipped.
+	if err := vs.Delete("test", id, VectorVersion{WallTime: 100, Logical: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Vector should still be findable.
+	results, err := vs.Search("test", vec, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected vector to still exist after older-version delete")
+	}
+	if results[0].ID != id {
+		t.Errorf("expected ID %x, got %x", id, results[0].ID)
+	}
+}
+
+func TestDelete_LWW_NewerVersionApplied(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	if err := vs.CreateCollection("test", testCollectionConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	id := randomUUID()
+	vec := []float32{1, 0, 0, 0}
+
+	// Put with older version.
+	if err := vs.Put("test", id, vec, nil, VectorVersion{WallTime: 100, Logical: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete with newer version -- should succeed.
+	if err := vs.Delete("test", id, VectorVersion{WallTime: 200, Logical: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Vector should be gone.
+	results, err := vs.Search("test", vec, 10, &SearchOptions{EfSearch: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.ID == id {
+			t.Error("deleted vector appeared in search results")
+		}
+	}
+}
+
+func TestGetLatest_Found(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	if err := vs.CreateCollection("test", testCollectionConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	id := randomUUID()
+	vec := []float32{1, 2, 3, 4}
+	ver := VectorVersion{WallTime: 500, Logical: 1}
+
+	if err := vs.Put("test", id, vec, nil, ver); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := vs.GetLatest("test", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !entry.Found {
+		t.Fatal("expected Found=true")
+	}
+	if entry.Deleted {
+		t.Error("expected Deleted=false")
+	}
+	if entry.Version.WallTime != ver.WallTime || entry.Version.Logical != ver.Logical {
+		t.Errorf("version: got %+v, want %+v", entry.Version, ver)
+	}
+	if len(entry.Vector) != 4 {
+		t.Fatalf("vector length: got %d, want 4", len(entry.Vector))
+	}
+	for i, f := range vec {
+		if entry.Vector[i] != f {
+			t.Errorf("vec[%d]: got %v, want %v", i, entry.Vector[i], f)
+		}
+	}
+}
+
+func TestGetLatest_NotFound(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	if err := vs.CreateCollection("test", testCollectionConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := vs.GetLatest("test", randomUUID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Found {
+		t.Error("expected Found=false for nonexistent id")
+	}
+}
+
+func TestGetLatest_Deleted(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	if err := vs.CreateCollection("test", testCollectionConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	id := randomUUID()
+	if err := vs.Put("test", id, []float32{1, 0, 0, 0}, nil, VectorVersion{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := vs.Delete("test", id, VectorVersion{}); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := vs.GetLatest("test", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !entry.Found {
+		t.Error("expected Found=true for deleted vector")
+	}
+	if !entry.Deleted {
+		t.Error("expected Deleted=true")
+	}
+}
+
+func TestGetCollectionConfig(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	cfg := CollectionConfig{
+		Dim:         8,
+		Metric:      MetricCosine,
+		M:           32,
+		EfConstruct: 400,
+		EfSearch:    100,
+		MaxVectors:  5000,
+	}
+	if err := vs.CreateCollection("mycol", cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := vs.GetCollectionConfig("mycol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Dim != cfg.Dim {
+		t.Errorf("Dim: got %d, want %d", got.Dim, cfg.Dim)
+	}
+	if got.Metric != cfg.Metric {
+		t.Errorf("Metric: got %d, want %d", got.Metric, cfg.Metric)
+	}
+	if got.M != cfg.M {
+		t.Errorf("M: got %d, want %d", got.M, cfg.M)
+	}
+	if got.EfConstruct != cfg.EfConstruct {
+		t.Errorf("EfConstruct: got %d, want %d", got.EfConstruct, cfg.EfConstruct)
+	}
+	if got.EfSearch != cfg.EfSearch {
+		t.Errorf("EfSearch: got %d, want %d", got.EfSearch, cfg.EfSearch)
+	}
+	if got.MaxVectors != cfg.MaxVectors {
+		t.Errorf("MaxVectors: got %d, want %d", got.MaxVectors, cfg.MaxVectors)
+	}
+}
+
+func TestCollectionReady(t *testing.T) {
+	d := testDB(t)
+	vs, err := NewVectorStore(d, VectorStoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+
+	if err := vs.CreateCollection("test", testCollectionConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	if !vs.CollectionReady("test") {
+		t.Error("expected CollectionReady=true for existing collection")
+	}
+	if vs.CollectionReady("nonexistent") {
+		t.Error("expected CollectionReady=false for nonexistent collection")
 	}
 }

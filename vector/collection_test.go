@@ -128,7 +128,7 @@ func TestMetricToDistanceFunc(t *testing.T) {
 		{99, false},
 	}
 	for _, tt := range tests {
-		_, err := metricToDistanceFunc(tt.metric)
+		_, err := MetricToDistanceFunc(tt.metric)
 		if (err == nil) != tt.ok {
 			t.Errorf("metric %d: err=%v, wantOK=%v", tt.metric, err, tt.ok)
 		}
