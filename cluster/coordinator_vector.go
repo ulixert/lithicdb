@@ -336,12 +336,12 @@ func (c *Coordinator) VectorSearch(
 		return cmp.Compare(a.Distance, b.Distance)
 	})
 
-	// Post-merge validation: walk candidates, validate against local state.
-	validated := make([]VectorSearchResult, 0, k)
+	// Post-merge validation: validate ALL candidates against local state.
+	// Must not early-exit at k - substituted vectors may have worse distances
+	// than candidates further down the list.
+	validated := make([]VectorSearchResult, 0, len(deduped))
+
 	for i := range deduped {
-		if len(validated) >= k {
-			break
-		}
 		r := &deduped[i]
 		latest, err := c.vectorStore.GetLatest(collection, r.ID)
 		if err != nil {
