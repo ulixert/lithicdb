@@ -111,6 +111,11 @@ func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server 
 		})
 	}
 
+	// Wire vector store to coordinator via adapter.
+	if cfg.coordinator != nil && cfg.vectorStore != nil {
+		cfg.coordinator.SetVectorStore(newVectorStoreAdapter(cfg.vectorStore))
+	}
+
 	return s
 }
 

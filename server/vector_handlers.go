@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ulixert/theseon/cluster"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"github.com/ulixert/theseon/vector"
 	"google.golang.org/grpc/codes"
@@ -79,6 +80,56 @@ func (s *Server) VectorPut(ctx context.Context, req *pb.VectorPutRequest) (*pb.V
 	return &pb.VectorPutResponse{}, nil
 }
 
+func (s *Server) VectorDelete(ctx context.Context, req *pb.VectorDeleteRequest) (*pb.VectorDeleteResponse, error) {
+	if s.vectorStore == nil {
+		return nil, status.Error(codes.Unavailable, "vector store not configured")
+	}
+	if len(req.Id) != 16 {
+		return nil, status.Error(codes.InvalidArgument, "id must be 16 bytes")
+	}
+
+	var id [16]byte
+	copy(id[:], req.Id)
+
+	if s.coordinator != nil {
+		if err := s.coordinator.VectorDelete(ctx, req.Collection, id); err != nil {
+			return nil, status.Errorf(codes.Internal, "coordinator vector delete: %v", err)
+		}
+		return &pb.VectorDeleteResponse{}, nil
+	}
+
+	ver := s.versionGen.Next()
+	if err := s.vectorStore.Delete(req.Collection, id, ver); err != nil {
+		return nil, status.Errorf(codes.Internal, "vector delete: %v", err)
+	}
+	return &pb.VectorDeleteResponse{}, nil
+}
+
+func (s *Server) VectorSearch(ctx context.Context, req *pb.VectorSearchRequest) (*pb.VectorSearchResponse, error) {
+	if s.vectorStore == nil {
+		return nil, status.Error(codes.Unavailable, "vector store not configured")
+	}
+
+	if s.coordinator != nil {
+		results, err := s.coordinator.VectorSearch(ctx, req.Collection, req.Query, int(req.K), int(req.Oversample), int(req.EfSearch))
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "coordinator vector search: %v", err)
+		}
+		return coordinatorResultsToProto(results), nil
+	}
+
+	// Standalone mode.
+	var opts *vector.SearchOptions
+	if req.EfSearch > 0 {
+		opts = &vector.SearchOptions{EfSearch: int(req.EfSearch)}
+	}
+	results, err := s.vectorStore.Search(req.Collection, req.Query, int(req.K), opts)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "vector search: %v", err)
+	}
+	return vectorResultsToProto(results), nil
+}
+
 // --- Proto conversion helpers ---
 
 // protoMetadataToVector converts proto metadata to cluster.Metadata (for the coordinator path).
@@ -121,4 +172,37 @@ func vectorMetadataToProto(meta vector.Metadata) map[string][]byte {
 		}
 	}
 	return result
+}
+
+func coordinatorResultsToProto(results []cluster.VectorSearchResult) *pb.VectorSearchResponse {
+	resp := &pb.VectorSearchResponse{
+		Results: make([]*pb.VectorSearchResult, len(results)),
+	}
+	for i, r := range results {
+		resp.Results[i] = &pb.VectorSearchResult{
+			Id:              r.ID[:],
+			Vector:          r.Vector,
+			Distance:        r.Distance,
+			VersionWallTime: r.Version.WallTime,
+			VersionLogical:  r.Version.Logical,
+		}
+	}
+	return resp
+}
+
+func vectorResultsToProto(results []vector.Result) *pb.VectorSearchResponse {
+	resp := &pb.VectorSearchResponse{
+		Results: make([]*pb.VectorSearchResult, len(results)),
+	}
+	for i, r := range results {
+		resp.Results[i] = &pb.VectorSearchResult{
+			Id:              r.ID[:],
+			Vector:          r.Vector,
+			Distance:        r.Distance,
+			Metadata:        vectorMetadataToProto(r.Metadata),
+			VersionWallTime: r.Version.WallTime,
+			VersionLogical:  r.Version.Logical,
+		}
+	}
+	return resp
 }
