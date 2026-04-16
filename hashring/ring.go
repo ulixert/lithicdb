@@ -8,8 +8,10 @@
 package hashring
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/binary"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -161,6 +163,28 @@ func (r *Ring) Members() []Node {
 		members = append(members, node)
 	}
 	return members
+}
+
+// ReplaceMembers atomically rebuilds the ring with the given set of nodes.
+// The new vnodes slice and nodes map are built entirely before taking the
+// write lock, so concurrent readers never observe an empty or half-built ring.
+func (r *Ring) ReplaceMembers(nodes []Node) {
+	newNodes := make(map[string]Node, len(nodes))
+	newVnodes := make([]vnode, 0, len(nodes)*r.vnodesPerNode)
+	for _, n := range nodes {
+		newNodes[n.ID] = n
+		for i := range r.vnodesPerNode {
+			newVnodes = append(newVnodes, vnode{hash: hashVnode(n.ID, i), nodeID: n.ID})
+		}
+	}
+	slices.SortFunc(newVnodes, func(a, b vnode) int {
+		return cmp.Compare(a.hash, b.hash)
+	})
+
+	r.mu.Lock()
+	r.nodes = newNodes
+	r.vnodes = newVnodes
+	r.mu.Unlock()
 }
 
 // Size returns the number of physical nodes in the ring.
