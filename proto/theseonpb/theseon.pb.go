@@ -2481,6 +2481,7 @@ type JoinRingRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Addr            string                 `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`                                               // address of the node to join
 	ExpectedVersion uint64                 `protobuf:"varint,2,opt,name=expected_version,json=expectedVersion,proto3" json:"expected_version,omitempty"` // CAS guard: current ring descriptor version the caller expects
+	NodeId          string                 `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                             // unique identifier of the node to join
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2527,6 +2528,13 @@ func (x *JoinRingRequest) GetExpectedVersion() uint64 {
 		return x.ExpectedVersion
 	}
 	return 0
+}
+
+func (x *JoinRingRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
 }
 
 type JoinRingResponse struct {
@@ -2932,10 +2940,11 @@ const file_proto_theseonpb_theseon_proto_rawDesc = "" +
 	"\x17GetClusterStatusRequest\"\x9b\x01\n" +
 	"\x18GetClusterStatusResponse\x126\n" +
 	"\amembers\x18\x01 \x03(\v2\x1c.theseonpb.MemberUpdateProtoR\amembers\x12G\n" +
-	"\x0fring_descriptor\x18\x02 \x01(\v2\x1e.theseonpb.RingDescriptorProtoR\x0eringDescriptor\"P\n" +
+	"\x0fring_descriptor\x18\x02 \x01(\v2\x1e.theseonpb.RingDescriptorProtoR\x0eringDescriptor\"i\n" +
 	"\x0fJoinRingRequest\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12)\n" +
-	"\x10expected_version\x18\x02 \x01(\x04R\x0fexpectedVersion\"+\n" +
+	"\x10expected_version\x18\x02 \x01(\x04R\x0fexpectedVersion\x12\x17\n" +
+	"\anode_id\x18\x03 \x01(\tR\x06nodeId\"+\n" +
 	"\x10JoinRingResponse\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"Y\n" +
 	"\x13ActivateNodeRequest\x12\x17\n" +
