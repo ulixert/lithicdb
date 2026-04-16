@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 
 	"github.com/ulixert/theseon/hashring"
@@ -685,13 +684,3 @@ const (
 	HintVectorWrite  byte = 0xF1
 	HintVectorDelete byte = 0xF2
 )
-
-// logVectorSearch is a helper for debug logging.
-func logVectorSearch(logger *slog.Logger, collection string, k int, readable int, results int) {
-	logger.Debug("vector search completed",
-		"collection", collection,
-		"k", k,
-		"readable_replicas", readable,
-		"results", results,
-	)
-}
