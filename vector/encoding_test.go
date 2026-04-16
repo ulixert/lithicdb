@@ -16,12 +16,12 @@ func TestEncodeDecodeVector_RoundTrip(t *testing.T) {
 		"payload": []byte{0xDE, 0xAD},
 	}
 
-	encoded, err := EncodeVector(vec, meta)
+	encoded, err := EncodeVector(vec, meta, VectorVersion{})
 	if err != nil {
 		t.Fatalf("EncodeVector: %v", err)
 	}
 
-	gotVec, gotMeta, err := DecodeVector(encoded)
+	gotVec, gotMeta, _, err := DecodeVector(encoded)
 	if err != nil {
 		t.Fatalf("DecodeVector: %v", err)
 	}
@@ -64,11 +64,11 @@ func TestEncodeDecodeVector_EmptyMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			encoded, err := EncodeVector(vec, tt.meta)
+			encoded, err := EncodeVector(vec, tt.meta, VectorVersion{})
 			if err != nil {
 				t.Fatalf("EncodeVector: %v", err)
 			}
-			gotVec, gotMeta, err := DecodeVector(encoded)
+			gotVec, gotMeta, _, err := DecodeVector(encoded)
 			if err != nil {
 				t.Fatalf("DecodeVector: %v", err)
 			}
@@ -83,11 +83,11 @@ func TestEncodeDecodeVector_EmptyMetadata(t *testing.T) {
 }
 
 func TestEncodeDecodeVector_EmptyVector(t *testing.T) {
-	encoded, err := EncodeVector([]float32{}, nil)
+	encoded, err := EncodeVector([]float32{}, nil, VectorVersion{})
 	if err != nil {
 		t.Fatalf("EncodeVector: %v", err)
 	}
-	gotVec, _, err := DecodeVector(encoded)
+	gotVec, _, _, err := DecodeVector(encoded)
 	if err != nil {
 		t.Fatalf("DecodeVector: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestEncodeDecodeVector_EmptyVector(t *testing.T) {
 }
 
 func TestEncodeVector_UnsupportedType(t *testing.T) {
-	_, err := EncodeVector([]float32{1.0}, Metadata{"bad": []int{1, 2}})
+	_, err := EncodeVector([]float32{1.0}, Metadata{"bad": []int{1, 2}}, VectorVersion{})
 	if err == nil {
 		t.Fatal("expected error for unsupported type")
 	}
@@ -115,7 +115,7 @@ func TestDecodeVector_TruncatedData(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := DecodeVector(tt.data)
+			_, _, _, err := DecodeVector(tt.data)
 			if err == nil {
 				t.Error("expected error for truncated data")
 			}
@@ -124,7 +124,7 @@ func TestDecodeVector_TruncatedData(t *testing.T) {
 }
 
 func TestDecodeVector_BadVersion(t *testing.T) {
-	_, _, err := DecodeVector([]byte{99, 0, 0, 0, 0})
+	_, _, _, err := DecodeVector([]byte{99, 0, 0, 0, 0})
 	if err == nil {
 		t.Error("expected error for unsupported version")
 	}
@@ -138,11 +138,11 @@ func TestEncodeVector_Deterministic(t *testing.T) {
 		"m_mid":   int64(7),
 	}
 
-	encoded1, err := EncodeVector(vec, meta)
+	encoded1, err := EncodeVector(vec, meta, VectorVersion{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded2, err := EncodeVector(vec, meta)
+	encoded2, err := EncodeVector(vec, meta, VectorVersion{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,12 +159,12 @@ func TestEncodeDecodeVector_LargeVector(t *testing.T) {
 		vec[i] = float32(i) * 0.001
 	}
 
-	encoded, err := EncodeVector(vec, nil)
+	encoded, err := EncodeVector(vec, nil, VectorVersion{})
 	if err != nil {
 		t.Fatalf("EncodeVector: %v", err)
 	}
 
-	gotVec, _, err := DecodeVector(encoded)
+	gotVec, _, _, err := DecodeVector(encoded)
 	if err != nil {
 		t.Fatalf("DecodeVector: %v", err)
 	}
@@ -188,12 +188,12 @@ func TestEncodeDecodeVector_SpecialFloats(t *testing.T) {
 		math.MaxFloat32,
 	}
 
-	encoded, err := EncodeVector(vec, nil)
+	encoded, err := EncodeVector(vec, nil, VectorVersion{})
 	if err != nil {
 		t.Fatalf("EncodeVector: %v", err)
 	}
 
-	gotVec, _, err := DecodeVector(encoded)
+	gotVec, _, _, err := DecodeVector(encoded)
 	if err != nil {
 		t.Fatalf("DecodeVector: %v", err)
 	}
@@ -210,5 +210,101 @@ func TestEncodeDecodeVector_SpecialFloats(t *testing.T) {
 	}
 	if !math.IsNaN(float64(gotVec[2])) {
 		t.Errorf("vec[2]: got %v, want NaN", gotVec[2])
+	}
+}
+
+func TestEncodeDecodeVector_V2Version(t *testing.T) {
+	vec := []float32{1.0, 2.0, 3.0}
+	ver := VectorVersion{WallTime: 1000000, Logical: 42}
+
+	encoded, err := EncodeVector(vec, nil, ver)
+	if err != nil {
+		t.Fatalf("EncodeVector: %v", err)
+	}
+
+	gotVec, _, gotVer, err := DecodeVector(encoded)
+	if err != nil {
+		t.Fatalf("DecodeVector: %v", err)
+	}
+
+	if gotVer.WallTime != ver.WallTime {
+		t.Errorf("WallTime: got %d, want %d", gotVer.WallTime, ver.WallTime)
+	}
+	if gotVer.Logical != ver.Logical {
+		t.Errorf("Logical: got %d, want %d", gotVer.Logical, ver.Logical)
+	}
+	if len(gotVec) != len(vec) {
+		t.Fatalf("vector length: got %d, want %d", len(gotVec), len(vec))
+	}
+	for i := range vec {
+		if gotVec[i] != vec[i] {
+			t.Errorf("vec[%d]: got %v, want %v", i, gotVec[i], vec[i])
+		}
+	}
+}
+
+func TestDecodeVector_V1BackwardCompat(t *testing.T) {
+	// Manually construct v1 bytes: [version=1][dim:2 LE][floats][num_fields:2 LE = 0]
+	dim := uint16(2)
+	var buf []byte
+	buf = append(buf, encodingVersionV1) // version byte
+
+	// dim (little-endian)
+	buf = append(buf, byte(dim), byte(dim>>8))
+
+	// two float32s: 1.0 and 2.0
+	f1 := math.Float32bits(1.0)
+	buf = append(buf, byte(f1), byte(f1>>8), byte(f1>>16), byte(f1>>24))
+	f2 := math.Float32bits(2.0)
+	buf = append(buf, byte(f2), byte(f2>>8), byte(f2>>16), byte(f2>>24))
+
+	// 0 metadata fields
+	buf = append(buf, 0, 0)
+
+	gotVec, _, gotVer, err := DecodeVector(buf)
+	if err != nil {
+		t.Fatalf("DecodeVector v1: %v", err)
+	}
+
+	if !gotVer.IsZero() {
+		t.Errorf("expected zero VectorVersion for v1, got %+v", gotVer)
+	}
+	if len(gotVec) != 2 || gotVec[0] != 1.0 || gotVec[1] != 2.0 {
+		t.Errorf("vector mismatch: got %v, want [1.0, 2.0]", gotVec)
+	}
+}
+
+func TestDecodeVectorVersion_V2(t *testing.T) {
+	ver := VectorVersion{WallTime: 9999999, Logical: 7}
+	encoded, err := EncodeVector([]float32{1.0}, nil, ver)
+	if err != nil {
+		t.Fatalf("EncodeVector: %v", err)
+	}
+
+	gotVer, err := DecodeVectorVersion(encoded)
+	if err != nil {
+		t.Fatalf("DecodeVectorVersion: %v", err)
+	}
+	if gotVer.WallTime != ver.WallTime {
+		t.Errorf("WallTime: got %d, want %d", gotVer.WallTime, ver.WallTime)
+	}
+	if gotVer.Logical != ver.Logical {
+		t.Errorf("Logical: got %d, want %d", gotVer.Logical, ver.Logical)
+	}
+}
+
+func TestDecodeVectorVersion_V1(t *testing.T) {
+	// Manually construct minimal v1 bytes.
+	var buf []byte
+	buf = append(buf, encodingVersionV1)
+	buf = append(buf, 0, 0) // dim=0
+	buf = append(buf, 0, 0) // 0 metadata fields
+
+	gotVer, err := DecodeVectorVersion(buf)
+	if err != nil {
+		t.Fatalf("DecodeVectorVersion v1: %v", err)
+	}
+	if !gotVer.IsZero() {
+		t.Errorf("expected zero VectorVersion for v1, got %+v", gotVer)
 	}
 }

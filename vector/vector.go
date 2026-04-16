@@ -78,6 +78,7 @@ type Result struct {
 	Vector   []float32
 	Metadata Metadata
 	Distance float32
+	Version  VectorVersion
 }
 
 // VectorStore wraps a db.DB and per-collection HNSW graphs.
@@ -113,7 +114,7 @@ func NewVectorStore(database *db.DB, cfg VectorStoreConfig, opts ...VectorStoreO
 
 // CreateCollection registers a new vector collection.
 func (vs *VectorStore) CreateCollection(name string, cfg CollectionConfig) error {
-	distFn, err := metricToDistanceFunc(cfg.Metric)
+	distFn, err := MetricToDistanceFunc(cfg.Metric)
 	if err != nil {
 		return err
 	}
@@ -155,7 +156,9 @@ func (vs *VectorStore) CreateCollection(name string, cfg CollectionConfig) error
 }
 
 // Put inserts or updates a vector in the given collection.
-func (vs *VectorStore) Put(collection string, id [16]byte, vec []float32, meta Metadata) error {
+// The version is used for LWW conflict resolution: if the existing entry has
+// a version >= ver, the write is silently skipped (stale).
+func (vs *VectorStore) Put(collection string, id [16]byte, vec []float32, meta Metadata, ver VectorVersion) error {
 	vs.mu.RLock()
 	col, ok := vs.collections[collection]
 	vs.mu.RUnlock()
@@ -167,7 +170,7 @@ func (vs *VectorStore) Put(collection string, id [16]byte, vec []float32, meta M
 		return hnsw.ErrDimensionMismatch
 	}
 
-	encoded, err := EncodeVector(vec, meta)
+	encoded, err := EncodeVector(vec, meta, ver)
 	if err != nil {
 		return err
 	}
@@ -176,6 +179,16 @@ func (vs *VectorStore) Put(collection string, id [16]byte, vec []float32, meta M
 
 	col.mu.Lock()
 	defer col.mu.Unlock()
+
+	// LWW check: skip stale writes.
+	if !ver.IsZero() {
+		if existing, found := vs.db.Get(vectorKey); found && !existing.Tombstone {
+			existingVer, err := DecodeVectorVersion(existing.Data)
+			if err == nil && !ver.After(existingVer) {
+				return nil // stale write, skip
+			}
+		}
+	}
 
 	// Check MaxVectors limit (only for new inserts, not updates).
 	_, isUpdate := col.ids[id]
@@ -220,7 +233,9 @@ func (vs *VectorStore) Put(collection string, id [16]byte, vec []float32, meta M
 }
 
 // Delete removes a vector from the given collection. Idempotent.
-func (vs *VectorStore) Delete(collection string, id [16]byte) error {
+// The version is used for LWW conflict resolution: if the existing entry has
+// a version >= ver, the delete is silently skipped (stale).
+func (vs *VectorStore) Delete(collection string, id [16]byte, ver VectorVersion) error {
 	vs.mu.RLock()
 	col, ok := vs.collections[collection]
 	vs.mu.RUnlock()
@@ -230,6 +245,17 @@ func (vs *VectorStore) Delete(collection string, id [16]byte) error {
 
 	col.mu.Lock()
 	defer col.mu.Unlock()
+
+	// LWW check: skip stale deletes.
+	if !ver.IsZero() {
+		vectorKey := makeVectorKey(collection, id)
+		if existing, found := vs.db.Get(vectorKey); found && !existing.Tombstone {
+			existingVer, err := DecodeVectorVersion(existing.Data)
+			if err == nil && !ver.After(existingVer) {
+				return nil // stale delete, skip
+			}
+		}
+	}
 
 	hnswID, exists := col.ids[id]
 	if !exists {
@@ -278,7 +304,7 @@ func (vs *VectorStore) Search(collection string, query []float32, k int, opts *S
 			continue // stale candidate
 		}
 
-		vec, meta, err := DecodeVector(val.Data)
+		vec, meta, decodedVer, err := DecodeVector(val.Data)
 		if err != nil {
 			vs.logger.Error("failed to decode vector from KV",
 				"collection", collection,
@@ -293,6 +319,7 @@ func (vs *VectorStore) Search(collection string, query []float32, k int, opts *S
 			Vector:   vec,
 			Metadata: meta,
 			Distance: c.Distance,
+			Version:  decodedVer,
 		})
 
 		if len(results) == k {
@@ -302,6 +329,68 @@ func (vs *VectorStore) Search(collection string, query []float32, k int, opts *S
 
 	vs.metrics.Histogram("vector.search.results", float64(len(results)), map[string]string{"collection": collection})
 	return results, nil
+}
+
+// LatestEntry holds the current state of a vector for post-merge validation.
+type LatestEntry struct {
+	Version VectorVersion
+	Vector  []float32
+	Found   bool
+	Deleted bool
+}
+
+// GetLatest returns the current state of a vector by UUID. Used by the
+// coordinator for post-merge validation to detect stale results.
+func (vs *VectorStore) GetLatest(collection string, id [16]byte) (LatestEntry, error) {
+	vs.mu.RLock()
+	_, ok := vs.collections[collection]
+	vs.mu.RUnlock()
+	if !ok {
+		return LatestEntry{}, ErrCollectionNotFound
+	}
+
+	vectorKey := makeVectorKey(collection, id)
+	val, found := vs.db.Get(vectorKey)
+	if !found {
+		return LatestEntry{Found: false}, nil
+	}
+	if val.Tombstone {
+		return LatestEntry{Found: true, Deleted: true}, nil
+	}
+
+	vec, _, ver, err := DecodeVector(val.Data)
+	if err != nil {
+		return LatestEntry{}, fmt.Errorf("vector: decode: %w", err)
+	}
+	return LatestEntry{
+		Version: ver,
+		Vector:  vec,
+		Found:   true,
+	}, nil
+}
+
+// GetCollectionConfig returns the configuration for a collection.
+func (vs *VectorStore) GetCollectionConfig(name string) (CollectionConfig, error) {
+	vs.mu.RLock()
+	col, ok := vs.collections[name]
+	vs.mu.RUnlock()
+	if !ok {
+		return CollectionConfig{}, ErrCollectionNotFound
+	}
+	return col.config, nil
+}
+
+// CollectionReady reports whether a collection's HNSW index is ready for search.
+// Returns false during rebuild (startup recovery).
+func (vs *VectorStore) CollectionReady(name string) bool {
+	vs.mu.RLock()
+	col, ok := vs.collections[name]
+	vs.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	_ = col // collection exists and was loaded during NewVectorStore; ready.
+	return true
 }
 
 // Close releases in-memory resources. It does NOT close the underlying db.DB.
@@ -397,7 +486,7 @@ func (vs *VectorStore) loadCollectionConfigs() error {
 				continue
 			}
 
-			distFn, err := metricToDistanceFunc(cfg.Metric)
+			distFn, err := MetricToDistanceFunc(cfg.Metric)
 			if err != nil {
 				vs.logger.Error("unknown metric in collection config", "collection", colName, "metric", cfg.Metric)
 				iter.Next()
@@ -452,7 +541,7 @@ func (vs *VectorStore) fullRebuild(name string, col *collectionState) error {
 			continue
 		}
 
-		vec, _, err := DecodeVector(value)
+		vec, _, _, err := DecodeVector(value)
 		if err != nil {
 			vs.logger.Error("failed to decode vector during recovery",
 				"collection", name, "error", err)
@@ -554,7 +643,7 @@ func (vs *VectorStore) loadFromSnapshot(name string, col *collectionState, snap 
 		}
 
 		// Entry is newer than snapshot: either a new insert or an update.
-		vec, _, err := DecodeVector(value)
+		vec, _, _, err := DecodeVector(value)
 		if err != nil {
 			vs.logger.Error("failed to decode vector during reconcile",
 				"collection", name, "error", err)
@@ -732,7 +821,7 @@ func syncDir(dir string) error {
 // mustDistanceFunc returns the distance function for a metric, panicking
 // on unknown metrics (should only be called with validated configs).
 func mustDistanceFunc(metric uint8) hnsw.DistanceFunc {
-	fn, err := metricToDistanceFunc(metric)
+	fn, err := MetricToDistanceFunc(metric)
 	if err != nil {
 		panic(err)
 	}

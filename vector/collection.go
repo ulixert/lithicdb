@@ -3,6 +3,7 @@ package vector
 import (
 	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 
 	"github.com/ulixert/theseon/vector/hnsw"
 )
@@ -13,6 +14,8 @@ const (
 	kindConfig      byte = 0x00 // collection config; sorts before kindVector
 	kindVector      byte = 0x01 // vector entry
 )
+
+const collectionConfigVersion byte = 1
 
 // Distance metric identifiers stored in collection config.
 const (
@@ -37,7 +40,7 @@ const collectionConfigSize = 1 + 2 + 1 + 2 + 2 + 2 + 8 // 18 bytes
 
 func encodeCollectionConfig(cfg CollectionConfig) []byte {
 	buf := make([]byte, 0, collectionConfigSize)
-	buf = append(buf, encodingVersion)
+	buf = append(buf, collectionConfigVersion)
 	buf = binary.LittleEndian.AppendUint16(buf, uint16(cfg.Dim))
 	buf = append(buf, cfg.Metric)
 	buf = binary.LittleEndian.AppendUint16(buf, uint16(cfg.M))
@@ -51,7 +54,7 @@ func decodeCollectionConfig(data []byte) (CollectionConfig, error) {
 	if len(data) < collectionConfigSize {
 		return CollectionConfig{}, fmt.Errorf("vector: collection config too short (%d bytes)", len(data))
 	}
-	if data[0] != encodingVersion {
+	if data[0] != collectionConfigVersion {
 		return CollectionConfig{}, fmt.Errorf("vector: unsupported config version %d", data[0])
 	}
 	return CollectionConfig{
@@ -142,8 +145,8 @@ func makeVectorKeyPrefixEnd(collection string) []byte {
 	return buf
 }
 
-// metricToDistanceFunc maps a stored metric identifier to an HNSW distance function.
-func metricToDistanceFunc(metric uint8) (hnsw.DistanceFunc, error) {
+// MetricToDistanceFunc maps a stored metric identifier to an HNSW distance function.
+func MetricToDistanceFunc(metric uint8) (hnsw.DistanceFunc, error) {
 	switch metric {
 	case MetricL2:
 		return hnsw.DistanceL2Squared, nil
@@ -154,4 +157,18 @@ func metricToDistanceFunc(metric uint8) (hnsw.DistanceFunc, error) {
 	default:
 		return nil, fmt.Errorf("vector: unknown metric %d", metric)
 	}
+}
+
+// ConfigDigest returns a hash of the collection config fields that must match
+// across replicas (dim, metric, M, efConstruct). Used for config validation
+// in distributed vector RPCs.
+func ConfigDigest(cfg CollectionConfig) uint64 {
+	h := fnv.New64a()
+	var buf [16]byte
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(cfg.Dim))
+	buf[4] = cfg.Metric
+	binary.LittleEndian.PutUint32(buf[5:9], uint32(cfg.M))
+	binary.LittleEndian.PutUint32(buf[9:13], uint32(cfg.EfConstruct))
+	h.Write(buf[:13])
+	return h.Sum64()
 }

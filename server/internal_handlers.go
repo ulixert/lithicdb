@@ -9,6 +9,7 @@ import (
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hlc"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
+	"github.com/ulixert/theseon/vector"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -18,9 +19,10 @@ import (
 // data-plane replication to the local db.DB via HLC-stamped envelopes.
 type internalServer struct {
 	pb.UnimplementedInternalServiceServer
-	membership *cluster.Membership
-	clock      *hlc.Clock // nil in standalone mode
-	db         *db.DB     // nil in standalone mode
+	membership  *cluster.Membership
+	clock       *hlc.Clock          // nil in standalone mode
+	db          *db.DB              // nil in standalone mode
+	vectorStore *vector.VectorStore // nil if vector store not configured
 }
 
 func (s *internalServer) Ping(_ context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
@@ -187,6 +189,137 @@ func (s *internalServer) ReplicateRead(_ context.Context, req *pb.ReplicateReadR
 		Found:     true,
 		Deleted:   env.Deleted,
 	}, nil
+}
+
+// --- Vector replication handlers ---
+
+func (s *internalServer) ReplicateVectorWrite(_ context.Context, req *pb.ReplicateVectorWriteRequest) (*pb.ReplicateVectorWriteResponse, error) {
+	if s.vectorStore == nil {
+		return nil, status.Error(codes.Unavailable, "vector store not configured")
+	}
+	if req.Timestamp == nil {
+		return nil, status.Error(codes.InvalidArgument, "timestamp is required")
+	}
+	if len(req.Id) != 16 {
+		return nil, status.Error(codes.InvalidArgument, "id must be 16 bytes")
+	}
+
+	// Config digest validation.
+	cfg, err := s.vectorStore.GetCollectionConfig(req.Collection)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "collection %q: %v", req.Collection, err)
+	}
+	localDigest := vector.ConfigDigest(cfg)
+	if req.ConfigDigest != 0 && req.ConfigDigest != localDigest {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"config digest mismatch for collection %q: local=%d, remote=%d",
+			req.Collection, localDigest, req.ConfigDigest)
+	}
+
+	ts := protoToHLCTimestamp(req.Timestamp)
+	if s.clock != nil {
+		if err := s.clock.Update(ts); err != nil {
+			return nil, status.Errorf(codes.Internal, "clock update: %v", err)
+		}
+	}
+
+	var id [16]byte
+	copy(id[:], req.Id)
+	ver := vector.VectorVersion{WallTime: ts.WallTime, Logical: ts.Logical}
+	meta := protoMetadataToVectorMeta(req.Metadata)
+
+	if err := s.vectorStore.Put(req.Collection, id, req.Vector, meta, ver); err != nil {
+		return nil, status.Errorf(codes.Internal, "vector put: %v", err)
+	}
+
+	return &pb.ReplicateVectorWriteResponse{}, nil
+}
+
+func (s *internalServer) ReplicateVectorDelete(_ context.Context, req *pb.ReplicateVectorDeleteRequest) (*pb.ReplicateVectorDeleteResponse, error) {
+	if s.vectorStore == nil {
+		return nil, status.Error(codes.Unavailable, "vector store not configured")
+	}
+	if req.Timestamp == nil {
+		return nil, status.Error(codes.InvalidArgument, "timestamp is required")
+	}
+	if len(req.Id) != 16 {
+		return nil, status.Error(codes.InvalidArgument, "id must be 16 bytes")
+	}
+
+	// Config digest validation.
+	cfg, err := s.vectorStore.GetCollectionConfig(req.Collection)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "collection %q: %v", req.Collection, err)
+	}
+	localDigest := vector.ConfigDigest(cfg)
+	if req.ConfigDigest != 0 && req.ConfigDigest != localDigest {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"config digest mismatch for collection %q", req.Collection)
+	}
+
+	ts := protoToHLCTimestamp(req.Timestamp)
+	if s.clock != nil {
+		if err := s.clock.Update(ts); err != nil {
+			return nil, status.Errorf(codes.Internal, "clock update: %v", err)
+		}
+	}
+
+	var id [16]byte
+	copy(id[:], req.Id)
+	ver := vector.VectorVersion{WallTime: ts.WallTime, Logical: ts.Logical}
+
+	if err := s.vectorStore.Delete(req.Collection, id, ver); err != nil {
+		return nil, status.Errorf(codes.Internal, "vector delete: %v", err)
+	}
+
+	return &pb.ReplicateVectorDeleteResponse{}, nil
+}
+
+func (s *internalServer) ReplicateVectorSearch(ctx context.Context, req *pb.ReplicateVectorSearchRequest) (*pb.ReplicateVectorSearchResponse, error) {
+	if s.vectorStore == nil {
+		return nil, status.Error(codes.Unavailable, "vector store not configured")
+	}
+
+	// Config digest validation.
+	cfg, err := s.vectorStore.GetCollectionConfig(req.Collection)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "collection %q: %v", req.Collection, err)
+	}
+	localDigest := vector.ConfigDigest(cfg)
+	if req.ConfigDigest != 0 && req.ConfigDigest != localDigest {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"config digest mismatch for collection %q", req.Collection)
+	}
+
+	// Collection readiness check.
+	if !s.vectorStore.CollectionReady(req.Collection) {
+		return nil, status.Errorf(codes.Unavailable,
+			"collection %q is rebuilding", req.Collection)
+	}
+
+	// Do NOT call clock.Update() — reads don't update clocks.
+	var opts *vector.SearchOptions
+	if req.EfSearch > 0 {
+		opts = &vector.SearchOptions{EfSearch: int(req.EfSearch)}
+	}
+	results, err := s.vectorStore.Search(req.Collection, req.Query, int(req.K), opts)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "vector search: %v", err)
+	}
+
+	resp := &pb.ReplicateVectorSearchResponse{
+		Results: make([]*pb.VectorSearchResult, len(results)),
+	}
+	for i, r := range results {
+		resp.Results[i] = &pb.VectorSearchResult{
+			Id:              r.ID[:],
+			Vector:          r.Vector,
+			Distance:        r.Distance,
+			VersionWallTime: r.Version.WallTime,
+			VersionLogical:  r.Version.Logical,
+		}
+	}
+	return resp, nil
 }
 
 // --- Proto ↔ domain conversion (server-side) ---

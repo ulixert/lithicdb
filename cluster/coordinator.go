@@ -43,15 +43,16 @@ func DefaultCoordinatorConfig() CoordinatorConfig {
 // fanning out to N replicas and collecting quorum responses. It
 // performs async read repair when stale replicas are detected.
 type Coordinator struct {
-	cfg        CoordinatorConfig
-	selfID     string
-	ring       *hashring.Ring
-	membership *Membership
-	clock      *hlc.Clock
-	localDB    *db.DB
-	dialer     ReplicaDialer
-	hintStore  *hintedhandoff.Store
-	logger     *slog.Logger
+	cfg         CoordinatorConfig
+	selfID      string
+	ring        *hashring.Ring
+	membership  *Membership
+	clock       *hlc.Clock
+	localDB     *db.DB
+	dialer      ReplicaDialer
+	hintStore   *hintedhandoff.Store
+	vectorStore LocalVectorSearcher
+	logger      *slog.Logger
 }
 
 // NewCoordinator creates a coordinator. All dependencies are required
