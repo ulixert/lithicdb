@@ -249,6 +249,12 @@ func (c *Coordinator) VectorSearch(
 
 	digest, _ := c.vectorStore.ConfigDigest(collection)
 
+	// Build node-ID → addr map for read repair.
+	nodeAddrs := make(map[string]string, len(readable))
+	for _, r := range readable {
+		nodeAddrs[r.ID] = r.Addr
+	}
+
 	// Fan out to ALL readable replicas.
 	type replicaResult struct {
 		nodeID  string
@@ -270,9 +276,15 @@ func (c *Coordinator) VectorSearch(
 		}(replica)
 	}
 
+	// Tagged result: search result with provenance (which node returned it).
+	type taggedResult struct {
+		VectorSearchResult
+		sourceNode string
+	}
+
 	// Require R successes, but merge ALL responses received before deadline.
 	totalCap := len(readable) * perReplicaK
-	allResults := make([]VectorSearchResult, 0, totalCap)
+	allResults := make([]taggedResult, 0, totalCap)
 	successes := 0
 	failures := 0
 	maxFailures := len(readable) - c.cfg.ReadQuorum + 1
@@ -286,7 +298,9 @@ func (c *Coordinator) VectorSearch(
 			errs = append(errs, fmt.Errorf("node %s: %w", r.nodeID, r.err))
 		} else {
 			successes++
-			allResults = append(allResults, r.results...)
+			for _, res := range r.results {
+				allResults = append(allResults, taggedResult{res, r.nodeID})
+			}
 		}
 	}
 
@@ -301,24 +315,43 @@ func (c *Coordinator) VectorSearch(
 		select {
 		case r := <-ch:
 			if r.err == nil {
-				allResults = append(allResults, r.results...)
+				for _, res := range r.results {
+					allResults = append(allResults, taggedResult{res, r.nodeID})
+				}
 			}
 		default:
 			// no more results ready
 		}
 	}
 
-	// Deduplicate by UUID - keep highest version.
-	seen := make(map[[16]byte]int, totalCap)
+	// Deduplicate by UUID - keep the highest version.
+	// Also build the provenance map: UUID → a set of nodes that returned a stale version.
+	type dedupEntry struct {
+		idx     int // index into deduped slice
+		version VectorVersion
+	}
+	seen := make(map[[16]byte]dedupEntry, totalCap)
 	deduped := make([]VectorSearchResult, 0, len(allResults))
-	for _, r := range allResults {
-		if idx, ok := seen[r.ID]; ok {
-			if r.Version.After(deduped[idx].Version) {
-				deduped[idx] = r
+
+	// provenance: UUID → nodes that returned this UUID with ANY version.
+	// After dedup, nodes whose version != the winning version are stale.
+	type provenanceEntry struct {
+		nodeID  string
+		version VectorVersion
+	}
+	provenance := make(map[[16]byte][]provenanceEntry, totalCap)
+
+	for _, tr := range allResults {
+		provenance[tr.ID] = append(provenance[tr.ID], provenanceEntry{tr.sourceNode, tr.Version})
+
+		if entry, ok := seen[tr.ID]; ok {
+			if tr.Version.After(entry.version) {
+				deduped[entry.idx] = tr.VectorSearchResult
+				seen[tr.ID] = dedupEntry{entry.idx, tr.Version}
 			}
 		} else {
-			seen[r.ID] = len(deduped)
-			deduped = append(deduped, r)
+			seen[tr.ID] = dedupEntry{len(deduped), tr.Version}
+			deduped = append(deduped, tr.VectorSearchResult)
 		}
 	}
 
@@ -331,15 +364,13 @@ func (c *Coordinator) VectorSearch(
 		deduped[i].Distance = distFn(query, deduped[i].Vector)
 	}
 
-	// Sort by distance ascending.
-	slices.SortFunc(deduped, func(a, b VectorSearchResult) int {
-		return cmp.Compare(a.Distance, b.Distance)
-	})
-
 	// Post-merge validation: validate ALL candidates against local state.
 	// Must not early-exit at k - substituted vectors may have worse distances
 	// than candidates further down the list.
 	validated := make([]VectorSearchResult, 0, len(deduped))
+
+	// Collect repair targets: stale nodes that need updated vectors.
+	var repairs []repairTarget
 
 	for i := range deduped {
 		r := &deduped[i]
@@ -356,17 +387,45 @@ func (c *Coordinator) VectorSearch(
 		}
 		if latest.Version.After(r.Version) {
 			if latest.Deleted {
-				continue // locally known to be deleted, skip
+				// Locally known to be deleted - skip from results.
+				// Identify stale nodes for delete repair.
+				for _, pe := range provenance[r.ID] {
+					if pe.nodeID != c.selfID {
+						repairs = append(repairs, repairTarget{
+							nodeID:     pe.nodeID,
+							collection: collection,
+							id:         r.ID,
+							version:    latest.Version,
+							deleted:    true,
+						})
+					}
+				}
+				continue
 			}
-			// Locally has a newer live version - substitute.
+			// Locally has a newer live version - substitute and recompute distance.
 			r.Vector = latest.Vector
 			r.Distance = distFn(query, latest.Vector)
 			r.Version = latest.Version
 		}
 		validated = append(validated, *r)
+
+		// Identify stale nodes for write repair: any node that returned this
+		// UUID with a version older than the winning version.
+		winningVersion := r.Version
+		for _, pe := range provenance[r.ID] {
+			if pe.nodeID != c.selfID && winningVersion.After(pe.version) {
+				repairs = append(repairs, repairTarget{
+					nodeID:     pe.nodeID,
+					collection: collection,
+					id:         r.ID,
+					vec:        r.Vector,
+					version:    winningVersion,
+				})
+			}
+		}
 	}
 
-	// Re-sort after substitutions (some distances may have changed).
+	// Sort after substitutions (some distances changed) and take top-k.
 	slices.SortFunc(validated, func(a, b VectorSearchResult) int {
 		return cmp.Compare(a.Distance, b.Distance)
 	})
@@ -375,7 +434,69 @@ func (c *Coordinator) VectorSearch(
 		validated = validated[:k]
 	}
 
+	// Async read repair: fire-and-forget repairs to stale replicas.
+	if len(repairs) > 0 {
+		go c.vectorReadRepair(collection, digest, nodeAddrs, repairs)
+	}
+
 	return validated, nil
+}
+
+// repairTarget describes a single vector that needs to be repaired on a stale node.
+type repairTarget struct {
+	nodeID     string
+	collection string
+	id         [16]byte
+	vec        []float32
+	meta       Metadata
+	version    VectorVersion
+	deleted    bool
+}
+
+// vectorReadRepair sends the latest vector state to stale replicas.
+// Runs in a background goroutine - fire-and-forget. Each repair gets its
+// own goroutine with a per-replica timeout, same pattern as KV read repair.
+func (c *Coordinator) vectorReadRepair(collection string, digest uint64, nodeAddrs map[string]string, repairs []repairTarget) {
+	// Deduplicate: only send one repair per (nodeID, vectorID) pair.
+	type repairKey struct {
+		nodeID string
+		id     [16]byte
+	}
+	seen := make(map[repairKey]struct{}, len(repairs))
+
+	for _, r := range repairs {
+		rk := repairKey{r.nodeID, r.id}
+		if _, ok := seen[rk]; ok {
+			continue
+		}
+		seen[rk] = struct{}{}
+
+		addr, ok := nodeAddrs[r.nodeID]
+		if !ok {
+			c.logger.Warn("vector read repair: no addr for node", "node", r.nodeID)
+			continue
+		}
+
+		go func(rt repairTarget, addr string) {
+			rctx, cancel := context.WithTimeout(context.Background(), c.cfg.PerReplicaTimeout)
+			defer cancel()
+
+			ts := hlc.Timestamp{WallTime: rt.version.WallTime, Logical: rt.version.Logical}
+			var repairErr error
+			if rt.deleted {
+				repairErr = c.remoteVectorDelete(rctx, addr, rt.collection, rt.id, ts, digest)
+			} else {
+				repairErr = c.remoteVectorWrite(rctx, addr, rt.collection, rt.id, rt.vec, rt.meta, ts, digest)
+			}
+			if repairErr != nil {
+				c.logger.Warn("vector read repair failed",
+					"node", rt.nodeID, "collection", rt.collection, "err", repairErr)
+			} else {
+				c.logger.Debug("vector read repair sent",
+					"node", rt.nodeID, "collection", rt.collection)
+			}
+		}(r, addr)
+	}
 }
 
 // remoteVectorWrite sends a ReplicateVectorWrite RPC to a single replica.
