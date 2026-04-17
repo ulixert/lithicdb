@@ -203,6 +203,17 @@ func (m *Membership) RingStateOf(nodeID string) RingState {
 	return RingNone
 }
 
+// AddrOf returns the network address of the given node, or an empty
+// string if the node is unknown.
+func (m *Membership) AddrOf(nodeID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if ms, ok := m.members[nodeID]; ok {
+		return ms.Addr
+	}
+	return ""
+}
+
 // GetMembers returns a snapshot of all known members.
 func (m *Membership) GetMembers() []MemberState {
 	m.mu.RLock()
