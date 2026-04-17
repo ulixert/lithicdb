@@ -88,6 +88,20 @@ func (c *Coordinator) SetHintStore(hs *hintedhandoff.Store) {
 	c.hintStore = hs
 }
 
+// splitReplicas partitions ring replicas into voters (Active) and learners
+// (Joining). Only voter acks count toward write quorum; learners receive
+// fire-and-forget writes for data seeding during onboarding.
+func (c *Coordinator) splitReplicas(replicas []hashring.Node) (voters, learners []hashring.Node) {
+	for _, r := range replicas {
+		if c.membership.RingStateOf(r.ID) == RingJoining {
+			learners = append(learners, r)
+		} else {
+			voters = append(voters, r)
+		}
+	}
+	return voters, learners
+}
+
 // Write replicates a key-value pair to N replicas and waits for W acks.
 func (c *Coordinator) Write(ctx context.Context, key, value []byte) error {
 	return c.writeInternal(ctx, key, value, false)
@@ -109,8 +123,12 @@ func (c *Coordinator) writeInternal(ctx context.Context, key, value []byte, dele
 	// Operations succeed as long as enough replicas exist to meet quorum.
 	// A 1-node cluster with W=1 works; a 2-node cluster with W=2 works.
 	// GetNodes caps at the number of physical nodes, so len(replicas) <= N.
-	if len(replicas) < c.cfg.WriteQuorum {
-		return fmt.Errorf("%w: have %d, need %d", ErrNotEnoughReplicas, len(replicas), c.cfg.WriteQuorum)
+	//
+	// Split into voters (Active) and learners (Joining).
+	// Only voter acks count toward write quorum.
+	voters, learners := c.splitReplicas(replicas)
+	if len(voters) < c.cfg.WriteQuorum {
+		return fmt.Errorf("%w: have %d active replicas, need %d", ErrNotEnoughReplicas, len(voters), c.cfg.WriteQuorum)
 	}
 
 	// Encode envelope for local writes.
@@ -123,15 +141,27 @@ func (c *Coordinator) writeInternal(ctx context.Context, key, value []byte, dele
 		return fmt.Errorf("encode envelope: %w", err)
 	}
 
+	// Fire-and-forget writes to learners (data seeding, no quorum impact).
+	for _, node := range learners {
+		go func(n hashring.Node) {
+			if !c.membership.IsRoutable(n.ID) {
+				return
+			}
+			if err := c.remoteWrite(ctx, n.Addr, key, value, ts, deleted); err != nil {
+				c.logger.Warn("learner write failed", "node", n.ID, "err", err)
+			}
+		}(node)
+	}
+
 	type ack struct {
 		nodeID string
 		err    error
 	}
 	// Buffered so all goroutines can complete without blocking,
 	// even if we return early after quorum is met.
-	acks := make(chan ack, len(replicas))
+	acks := make(chan ack, len(voters))
 
-	for _, replica := range replicas {
+	for _, replica := range voters {
 		go func(node hashring.Node) {
 			var writeErr error
 			if node.ID == c.selfID {
@@ -139,7 +169,7 @@ func (c *Coordinator) writeInternal(ctx context.Context, key, value []byte, dele
 			} else if c.membership.IsRoutable(node.ID) {
 				writeErr = c.remoteWrite(ctx, node.Addr, key, value, ts, deleted)
 			} else {
-				// Dead node - store hint for later replay.
+				// Dead voter - store hint for later replay.
 				if c.hintStore != nil {
 					if hintErr := c.hintStore.Add(node.ID, key, encoded, ts); hintErr != nil {
 						c.logger.Warn("failed to store hint",
@@ -155,8 +185,8 @@ func (c *Coordinator) writeInternal(ctx context.Context, key, value []byte, dele
 	}
 
 	// Return as soon as W acks are collected or quorum becomes impossible.
-	// maxFailures: once these many replicas fail, W acks can never be reached.
-	maxFailures := len(replicas) - c.cfg.WriteQuorum + 1
+	// maxFailures: once these many voters fail, W acks can never be reached.
+	maxFailures := len(voters) - c.cfg.WriteQuorum + 1
 	successes := 0
 	failures := 0
 	var errs []error
