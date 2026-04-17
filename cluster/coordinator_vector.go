@@ -89,17 +89,30 @@ func (c *Coordinator) VectorWrite(ctx context.Context, collection string, id [16
 	}
 
 	replicas := c.ring.GetNodes([]byte(collection), c.cfg.ReplicationFactor)
-	if len(replicas) < c.cfg.WriteQuorum {
-		return fmt.Errorf("%w: have %d, need %d", ErrNotEnoughReplicas, len(replicas), c.cfg.WriteQuorum)
+	voters, learners := c.splitReplicas(replicas)
+	if len(voters) < c.cfg.WriteQuorum {
+		return fmt.Errorf("%w: have %d active replicas, need %d", ErrNotEnoughReplicas, len(voters), c.cfg.WriteQuorum)
+	}
+
+	// Fire-and-forget writes to learners (data seeding, no quorum impact).
+	for _, node := range learners {
+		go func(n hashring.Node) {
+			if !c.membership.IsRoutable(n.ID) {
+				return
+			}
+			if err := c.remoteVectorWrite(ctx, n.Addr, collection, id, vec, meta, ts, digest); err != nil {
+				c.logger.Warn("learner vector write failed", "node", n.ID, "err", err)
+			}
+		}(node)
 	}
 
 	type ack struct {
 		nodeID string
 		err    error
 	}
-	acks := make(chan ack, len(replicas))
+	acks := make(chan ack, len(voters))
 
-	for _, replica := range replicas {
+	for _, replica := range voters {
 		go func(node hashring.Node) {
 			var writeErr error
 			if node.ID == c.selfID {
@@ -107,7 +120,7 @@ func (c *Coordinator) VectorWrite(ctx context.Context, collection string, id [16
 			} else if c.membership.IsRoutable(node.ID) {
 				writeErr = c.remoteVectorWrite(ctx, node.Addr, collection, id, vec, meta, ts, digest)
 			} else {
-				// Dead node - store hint for later replay.
+				// Dead voter - store hint for later replay.
 				if c.hintStore != nil {
 					hintErr := c.storeVectorWriteHint(node.ID, collection, id, vec, meta, ts, digest)
 					if hintErr != nil {
@@ -124,7 +137,7 @@ func (c *Coordinator) VectorWrite(ctx context.Context, collection string, id [16
 	}
 
 	// Quorum counting identical to writeInternal.
-	maxFailures := len(replicas) - c.cfg.WriteQuorum + 1
+	maxFailures := len(voters) - c.cfg.WriteQuorum + 1
 	successes := 0
 	failures := 0
 	var errs []error
@@ -161,17 +174,30 @@ func (c *Coordinator) VectorDelete(ctx context.Context, collection string, id [1
 	}
 
 	replicas := c.ring.GetNodes([]byte(collection), c.cfg.ReplicationFactor)
-	if len(replicas) < c.cfg.WriteQuorum {
-		return fmt.Errorf("%w: have %d, need %d", ErrNotEnoughReplicas, len(replicas), c.cfg.WriteQuorum)
+	voters, learners := c.splitReplicas(replicas)
+	if len(voters) < c.cfg.WriteQuorum {
+		return fmt.Errorf("%w: have %d active replicas, need %d", ErrNotEnoughReplicas, len(voters), c.cfg.WriteQuorum)
+	}
+
+	// Fire-and-forget deletes to learners.
+	for _, node := range learners {
+		go func(n hashring.Node) {
+			if !c.membership.IsRoutable(n.ID) {
+				return
+			}
+			if err := c.remoteVectorDelete(ctx, n.Addr, collection, id, ts, digest); err != nil {
+				c.logger.Warn("learner vector delete failed", "node", n.ID, "err", err)
+			}
+		}(node)
 	}
 
 	type ack struct {
 		nodeID string
 		err    error
 	}
-	acks := make(chan ack, len(replicas))
+	acks := make(chan ack, len(voters))
 
-	for _, replica := range replicas {
+	for _, replica := range voters {
 		go func(node hashring.Node) {
 			var writeErr error
 			if node.ID == c.selfID {
@@ -192,7 +218,7 @@ func (c *Coordinator) VectorDelete(ctx context.Context, collection string, id [1
 		}(replica)
 	}
 
-	maxFailures := len(replicas) - c.cfg.WriteQuorum + 1
+	maxFailures := len(voters) - c.cfg.WriteQuorum + 1
 	successes := 0
 	failures := 0
 	var errs []error
