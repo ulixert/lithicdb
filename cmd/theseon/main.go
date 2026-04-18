@@ -12,12 +12,18 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
+	"github.com/ulixert/theseon/cluster"
 	"github.com/ulixert/theseon/db"
+	"github.com/ulixert/theseon/node"
 	"github.com/ulixert/theseon/server"
 )
 
@@ -60,6 +66,57 @@ func adminUsage() {
 	fmt.Fprintln(os.Stderr, "usage: theseon admin <command> [flags]")
 	fmt.Fprintln(os.Stderr, "commands: status, join, activate, remove")
 	os.Exit(1)
+}
+
+// cmdServe starts a theseon node. When --node-id is set, the node runs
+// in cluster mode with full distributed stack. Otherwise, standalone.
+func cmdServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	addr := fs.String("addr", ":50051", "gRPC listen address")
+	dataDir := fs.String("data-dir", "./data", "database directory")
+	nodeID := fs.String("node-id", "", "unique node identifier (enables cluster mode)")
+	seeds := fs.String("seeds", "", "comma-separated seed peer addresses")
+	replFactor := fs.Int("replication-factor", 3, "replication factor (N)")
+	writeQuorum := fs.Int("write-quorum", 2, "write quorum (W)")
+	readQuorum := fs.Int("read-quorum", 2, "read quorum (R)")
+	fs.Parse(args)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	if *nodeID == "" {
+		// Standalone mode - no cluster.
+		runStandalone(ctx, *addr, *dataDir)
+		return
+	}
+
+	// Cluster mode.
+	var seedPeers []string
+	if *seeds != "" {
+		seedPeers = strings.Split(*seeds, ",")
+	}
+
+	n := node.New(node.Config{
+		NodeID:    *nodeID,
+		Addr:      *addr,
+		DataDir:   *dataDir,
+		SeedPeers: seedPeers,
+		Coord: cluster.CoordinatorConfig{
+			ReplicationFactor: *replFactor,
+			WriteQuorum:       *writeQuorum,
+			ReadQuorum:        *readQuorum,
+		},
+	})
+
+	if err := n.Start(ctx); err != nil {
+		log.Fatalf("start node: %v", err)
+	}
+
+	log.Printf("theseon cluster node %q listening on %s", *nodeID, n.Addr())
+
+	<-ctx.Done()
+	log.Println("shutting down...")
+	n.Stop()
 }
 
 // runStandalone starts a standalone (non-clustered) theseon server.
