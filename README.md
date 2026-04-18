@@ -1,13 +1,17 @@
 # Theseon
 
+[![CI](https://github.com/ulixert/theseon/actions/workflows/ci.yml/badge.svg)](https://github.com/ulixert/theseon/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/ulixert/theseon)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A distributed LSM-tree storage engine with native vector search, built from scratch in Go.
 
 Every core component — skip list, WAL, SSTable format, bloom filter, merge iterator, leveled compaction, snapshot
 isolation, optimistic transactions — is hand-built. The distributed layer — consistent hashing, hybrid logical clocks,
-SWIM gossip, quorum coordination, hinted handoff, merkle-tree anti-entropy — is equally from scratch. The vector search
-layer — HNSW index, binary vector encoding, snapshot persistence, metadata filtering, distributed fan-out — is built on
-the same foundation: vectors are regular KV entries, so replication and repair come for free. Only gRPC and protobuf use
-external libraries.
+SWIM gossip, quorum coordination, hinted handoff, node orchestration, admin CLI — is equally from scratch (merkle-tree
+anti-entropy is the next milestone). The vector search layer — HNSW index, binary vector encoding, snapshot persistence,
+distributed fan-out with exact rerank — is built on the same foundation: vectors are regular KV entries, so replication
+and repair come for free. Only gRPC and protobuf use external libraries.
 
 > "Theseon" comes from the Greek *Theseion* — the Temple of Hephaestus in Athens, one of the best-preserved ancient
 > structures. It also evokes Theseus navigating the labyrinth, which is roughly what HNSW does: traversing layers of
@@ -23,9 +27,10 @@ external libraries.
 6. [Who's Alive? Building SWIM Failure Detection from Scratch](https://ulixert.github.io/posts/theseon-swim-protocol/)
 7. [Quorum Reads, Quorum Writes, and the Repair That Follows](https://ulixert.github.io/posts/theseon-quorum-coordinator/)
 8. [Buffering Writes for Dead Replicas: Hinted Handoff](https://ulixert.github.io/posts/theseon-hinted-handoff/)
-10. [Building HNSW from Scratch: Graph Construction, Beam Search, and What Recall Actually Measures](https://ulixert.github.io/posts/theseon-hnsw-scratch/)
-11. [Making Vectors Durable: KV Integration, Snapshot Persistence, and the Bugs Along the Way](https://ulixert.github.io/posts/theseon-vector-kv-integration/)
-12. [Fan-Out, Merge, Repair: Distributed Vector Search](https://ulixert.github.io/posts/theseon-distributed-vector-search/)
+9. [Building HNSW from Scratch: Graph Construction, Beam Search, and What Recall Actually Measures](https://ulixert.github.io/posts/theseon-hnsw-scratch/)
+10. [Making Vectors Durable: KV Integration, Snapshot Persistence, and the Bugs Along the Way](https://ulixert.github.io/posts/theseon-vector-kv-integration/)
+11. [Fan-Out, Merge, Repair: Distributed Vector Search](https://ulixert.github.io/posts/theseon-distributed-vector-search/)
+12. [Starting, Joining, Activating: The Node Orchestrator](https://ulixert.github.io/posts/theseon-node-orchestrator/)
 
 ## Getting Started
 
@@ -115,8 +120,87 @@ func main() {
 }
 ```
 
-Vectors are stored as regular KV entries — they survive restarts via WAL replay and will flow through quorum
-replication, hinted handoff, and anti-entropy automatically.
+Vectors are stored as regular KV entries — they survive restarts via WAL replay and flow through quorum
+replication and hinted handoff automatically (anti-entropy is the next milestone).
+
+### Distributed search via gRPC
+
+The same API is exposed over gRPC. A client connects to **any** node — that node becomes the coordinator, hashes the
+collection name to the ring, fans out to all readable replicas, and merges results with exact reranking:
+
+```go
+import (
+"google.golang.org/grpc"
+"google.golang.org/grpc/credentials/insecure"
+pb "github.com/ulixert/theseon/proto/theseonpb"
+)
+
+conn, _ := grpc.NewClient("localhost:50051",
+grpc.WithTransportCredentials(insecure.NewCredentials()))
+defer conn.Close()
+client := pb.NewTheseonClient(conn)
+
+// Insert: coordinator replicates to voters, fire-and-forget to learners.
+client.VectorPut(ctx, &pb.VectorPutRequest{
+Collection: "embeddings",
+Id:         uuidBytes,
+Vector:     []float32{0.1, 0.2, 0.3, 0.4},
+})
+
+// Search: fan-out to all readable replicas (skips JOINING), each runs local
+// HNSW with k*oversample candidates, coordinator does exact rerank + dedup
+// + post-merge validation + provenance-tracked read repair.
+resp, _ := client.VectorSearch(ctx, &pb.VectorSearchRequest{
+Collection: "embeddings",
+Query:      []float32{0.1, 0.2, 0.3, 0.4},
+K:          10,
+})
+for _, r := range resp.Results {
+// r.Id (16-byte UUID), r.Distance (exact, not HNSW-approximate), r.Metadata
+}
+```
+
+No leader — every node accepts every RPC and becomes the coordinator for that request.
+
+## Running a Cluster
+
+Theseon ships a `serve` + `admin` CLI. Standalone mode runs when `--node-id` is omitted; cluster mode activates when
+it's
+set. The first cluster node starts with no seeds; later nodes pass `--seeds` to discover peers via SWIM gossip.
+
+```bash
+# Terminal 1: first cluster node (no seeds)
+./theseon serve --addr=:50051 --data-dir=./data1 --node-id=node-1
+
+# Terminal 2: second node — joins via SWIM gossip
+./theseon serve --addr=:50052 --data-dir=./data2 --node-id=node-2 --seeds=localhost:50051
+
+# Terminal 3: third node
+./theseon serve --addr=:50053 --data-dir=./data3 --node-id=node-3 --seeds=localhost:50051
+
+# Form the ring (CAS-safe — the CLI auto-fetches current version)
+./theseon admin join     --target=localhost:50051 --node-id=node-2 --addr=localhost:50052
+./theseon admin activate --target=localhost:50051 --node-id=node-2
+./theseon admin join     --target=localhost:50051 --node-id=node-3 --addr=localhost:50053
+./theseon admin activate --target=localhost:50051 --node-id=node-3
+
+# Inspect the cluster
+./theseon admin status --target=localhost:50051
+# NODE ID   ADDRESS           LIVENESS   RING STATE
+# node-1    localhost:50051   alive      active
+# node-2    localhost:50052   alive      active
+# node-3    localhost:50053   alive      active
+#
+# Ring version: 5
+```
+
+Once activated, every node accepts client RPCs — `Put`, `Get`, `Delete`, `VectorPut`, `VectorSearch` — and routes them
+through the coordinator (quorum fan-out, hinted handoff for dead replicas, LWW conflict resolution via HLC). Any node
+can coordinate any request; there is no leader.
+
+**Ring states.** A node transitions `None → Joining → Active` via explicit admin commands. `Joining` nodes receive
+replicated writes for data seeding but do not count toward write quorum and are excluded from reads — this prevents a
+committed write from being invisible to reads during the onboarding window.
 
 ## Architecture
 
@@ -138,7 +222,7 @@ replication, hinted handoff, and anti-entropy automatically.
           HLC clocks  ◄┼─────────┼──────────┼► cross-node ordering
                        │         │          │
              ┌─────────▼─────────▼──────────▼────────────┐
-             │          Theseon Engine (per node)       │
+             │          Theseon Engine (per node)        │
              │                                           │
              │  ┌──────────────────────────────────────┐ │
              │  │  Transaction Manager                 │ │
@@ -150,7 +234,7 @@ replication, hinted handoff, and anti-entropy automatically.
              │  │  Vector Store                        │ │
              │  │    Per-Collection HNSW Graphs        │ │
              │  │    KV-Verified Search (2x oversample)│ │
-             │  │    Snapshot Persistence + Recovery    │ │
+             │  │    Snapshot Persistence + Recovery   │ │
              │  └────────────────┬─────────────────────┘ │
              │                   │  vectors stored as    │
              │                   │  regular KV entries   │
@@ -222,6 +306,65 @@ Get("user:1234")
   │     └─ Binary search to find the single SSTable, then same path
   │
   └─► Not found
+```
+
+## How a Distributed Write Works
+
+```
+client.Put("user:1234", value) → any node (becomes the coordinator)
+  │
+  ├─► clock.Now() → HLC timestamp (walltime + logical)
+  │
+  ├─► ring.GetNodes(key, N=3) → [node-A, node-B, node-C]
+  │
+  ├─► Split replicas by ring state:
+  │     ├─ voters   (Active)  — count toward write quorum W
+  │     └─ learners (Joining) — receive writes, do NOT count toward W
+  │
+  ├─► If len(voters) < W → return ErrNotEnoughReplicas
+  │
+  ├─► Fan out in parallel:
+  │     ├─ self         → EncodeEnvelope(ts, value) → db.Put (local LSM)
+  │     ├─ voter alive  → ReplicateWrite RPC → counts toward W
+  │     ├─ voter dead   → hintStore.Add(target, key, envelope, ts)
+  │     └─ learner      → fire-and-forget ReplicateWrite (no ack tracking)
+  │
+  ├─► Collect voter acks until:
+  │     ├─ W acks received       → return success
+  │     └─ quorum impossible     → return ErrWriteQuorumNotMet
+  │
+  └─► Background convergence:
+        ├─ SWIM detects dead voter recovers (Dead→Alive)
+        ├─ Drainer sweeps hintStore for that target
+        └─ Replays via ReplicateWriteBatch → node catches up
+```
+
+## How a Distributed Read Works
+
+```
+client.Get("user:1234") → any node (becomes the coordinator)
+  │
+  ├─► ring.GetNodes(key, N=3) → [node-A, node-B, node-C]
+  │
+  ├─► Filter to readable: routable AND ring state != JOINING
+  │     (JOINING nodes may not have all data yet — skip them)
+  │
+  ├─► If len(readable) < R → return ErrReadQuorumNotMet
+  │
+  ├─► Fan out in parallel (per-replica timeout):
+  │     ├─ self  → db.Get + DecodeEnvelope → (timestamp, value, deleted)
+  │     ├─ peer  → ReplicateRead RPC
+  │     └─ peer  → ReplicateRead RPC
+  │
+  ├─► Phase 1 — collect until R responses arrive:
+  │     ├─ LWW pick by HLC timestamp → newest (ts, value, deleted)
+  │     └─ return to client (release latency budget)
+  │
+  └─► Phase 2 (background async read repair):
+        ├─ Collect remaining in-flight responses
+        ├─ Compare each response's ts to the winning ts
+        └─ For each stale replica → ReplicateWrite with newest envelope
+             (targeted: only stale nodes get the repair, not every replica)
 ```
 
 ## Design Decisions
@@ -319,6 +462,10 @@ These are deliberate scope boundaries, not oversights.
 
 ## Benchmarks
 
+**Single-node LSM engine only** — the numbers below cover the storage layer in isolation. Distributed cluster benchmarks
+(coordinator fan-out, quorum reads/writes, hinted handoff cost) and vector search benchmarks (HNSW recall/QPS, exact
+rerank latency, distributed search across replicas) are next up, now that the cluster is runnable end-to-end.
+
 Measured on Apple M1, 4KB blocks, 8MB block cache, leveled compaction (v0.5.0, mmap reader).
 
 | Operation                        | Throughput    | ns/op  |
@@ -375,16 +522,20 @@ active + immutable memtables) is negligible.
 ### Distributed Layer
 
 - [x] Standalone gRPC server wrapping `db.DB` (Put, Get, Delete, Scan)
-- [x] Consistent hash ring with virtual nodes (150 vnodes/node, SHA-256)
+- [x] Consistent hash ring with virtual nodes (150 vnodes/node, SHA-256, atomic `ReplaceMembers`)
 - [x] Hybrid logical clocks for cross-node timestamp ordering
 - [x] SWIM gossip protocol for decentralized failure detection
 - [x] Quorum coordinator with tunable R/W consistency (R + W > N)
+- [x] Voter/learner write split — JOINING nodes receive writes but don't count toward W
 - [x] Async read repair on quorum reads
-- [x] Hinted handoff for temporary node failures
+- [x] Hinted handoff for temporary node failures (KV + vector)
+- [x] Two-phase node join (JOINING → ACTIVE) via CAS-guarded admin commands
+- [x] `Node` orchestrator with ordered Start/Stop + rollback on partial failure
+- [x] Admin CLI for explicit topology management (status, join, activate, remove)
+- [x] Multi-node integration tests (3-node cluster with real TCP + SWIM + hinted handoff)
 - [ ] Merkle-tree anti-entropy with tombstone GC
-- [ ] Two-phase node join (JOINING → ACTIVE) with anti-entropy bootstrap
-- [ ] Admin CLI for explicit topology management (join, activate, remove)
-- [ ] Integration and chaos tests
+- [ ] Data streaming backfill to JOINING replicas (historical data migration)
+- [ ] Jepsen-style fault injection / chaos tests
 
 ### Vector Search
 
@@ -402,6 +553,10 @@ active + immutable memtables) is negligible.
 
 ```
 theseon/
+  cmd/theseon/     serve and admin subcommand CLI (standalone or cluster mode)
+  node/            top-level orchestrator: ordered Start/Stop, cleanup-stack rollback,
+                   wires DB + vector + HLC + ring + SWIM + coordinator + drainer + gRPC
+
   db/              engine: Put, Get, Delete, Scan, flush, recovery, compaction,
                    snapshots, transactions, MVCC-aware version GC
   compaction/      picker (L0 trigger + level size ratio), executor, level state
@@ -411,7 +566,18 @@ theseon/
   memtable/        skip list (from scratch), thread-safe wrapper, GetAt/GetNewest
   sstable/         block encoding, bloom filter, SSTable builder/reader, mmap, block cache
   wal/             write-ahead log: CRC32 framing, batch encoding, crash recovery
-  vector/          VectorStore: collection management, encoding, KV integration, metrics
+
+  cluster/         distributed layer: SWIM membership, coordinator (quorum fan-out + read
+                   repair), AdminService handlers (join/activate/remove with CAS),
+                   gRPC transport, peer pool, voter/learner write split
+    hintedhandoff/ separate hint DB, type-tagged envelopes, drainer (KV + vector replay)
+  hashring/        consistent hash ring: vnodes, SHA-256 placement, atomic ReplaceMembers
+  hlc/             hybrid logical clocks: wall-clock + logical counter, drift detection
+  server/          gRPC server: Theseon/Internal/Admin services, standalone/cluster routing
+  proto/theseonpb/ .proto definitions and generated code
+
+  vector/          VectorStore: collection management, encoding, KV integration, metrics,
+                   per-collection HNSW locks, VectorVersion (LWW)
     hnsw/          HNSW graph (from scratch): insert, beam search, tombstone cleanup
     eval/          recall@k, brute-force KNN, benchmarks, parameter sweep
 ```
