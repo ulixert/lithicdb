@@ -1,4 +1,4 @@
-// Package node provides the top-level orchestrator for theseon cluster node.
+// Package node provides the top-level orchestrator for a theseon cluster node.
 // It wires together the storage engine, vector store, SWIM membership,
 // coordinator, hinted handoff, and gRPC server into a single lifecycle.
 package node
@@ -49,6 +49,47 @@ func (c *Config) defaults() {
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
+	}
+	// SWIM parameters: fill each zero field from defaults so partial
+	// configs still boot. GossipInterval is the hottest — time.NewTicker(0) panics.
+	dcc := cluster.DefaultClusterConfig(c.NodeID, c.Addr)
+	if c.Cluster.GossipInterval == 0 {
+		c.Cluster.GossipInterval = dcc.GossipInterval
+	}
+	if c.Cluster.PingTimeout == 0 {
+		c.Cluster.PingTimeout = dcc.PingTimeout
+	}
+	if c.Cluster.SuspectTimeout == 0 {
+		c.Cluster.SuspectTimeout = dcc.SuspectTimeout
+	}
+	if c.Cluster.IndirectPeers == 0 {
+		c.Cluster.IndirectPeers = dcc.IndirectPeers
+	}
+	if c.Cluster.RetransmitMult == 0 {
+		c.Cluster.RetransmitMult = dcc.RetransmitMult
+	}
+	if c.Cluster.MaxPiggyback == 0 {
+		c.Cluster.MaxPiggyback = dcc.MaxPiggyback
+	}
+	if c.Cluster.MaxBroadcasts == 0 {
+		c.Cluster.MaxBroadcasts = dcc.MaxBroadcasts
+	}
+	if c.Cluster.DeadNodeReapTimeout == 0 {
+		c.Cluster.DeadNodeReapTimeout = dcc.DeadNodeReapTimeout
+	}
+	// Quorum parameters: fill each zero field from defaults.
+	dco := cluster.DefaultCoordinatorConfig()
+	if c.Coord.ReplicationFactor == 0 {
+		c.Coord.ReplicationFactor = dco.ReplicationFactor
+	}
+	if c.Coord.WriteQuorum == 0 {
+		c.Coord.WriteQuorum = dco.WriteQuorum
+	}
+	if c.Coord.ReadQuorum == 0 {
+		c.Coord.ReadQuorum = dco.ReadQuorum
+	}
+	if c.Coord.PerReplicaTimeout == 0 {
+		c.Coord.PerReplicaTimeout = dco.PerReplicaTimeout
 	}
 }
 
