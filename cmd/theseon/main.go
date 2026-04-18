@@ -206,6 +206,99 @@ func cmdAdminStatus(args []string) {
 	}
 }
 
+func cmdAdminJoin(args []string) {
+	fs := flag.NewFlagSet("admin join", flag.ExitOnError)
+	target := fs.String("target", "", "address of cluster node (required)")
+	nodeID := fs.String("node-id", "", "ID of node to join (required)")
+	nodeAddr := fs.String("addr", "", "address of node to join (required)")
+	fs.Parse(args)
+
+	if *target == "" || *nodeID == "" || *nodeAddr == "" {
+		fmt.Fprintln(os.Stderr, "error: --target, --node-id, and --addr are all required")
+		os.Exit(1)
+	}
+
+	client, cleanup := adminClient(*target)
+	defer cleanup()
+
+	// Get current ring version for CAS.
+	statusResp, err := client.GetClusterStatus(context.Background(), &pb.GetClusterStatusRequest{})
+	if err != nil {
+		log.Fatalf("get cluster status: %v", err)
+	}
+	version := statusResp.RingDescriptor.GetVersion()
+
+	resp, err := client.JoinRing(context.Background(), &pb.JoinRingRequest{
+		NodeId:          *nodeID,
+		Addr:            *nodeAddr,
+		ExpectedVersion: version,
+	})
+	if err != nil {
+		log.Fatalf("join ring: %v", err)
+	}
+	fmt.Printf("node %q joined ring as JOINING (ring version: %d)\n", resp.NodeId, version+1)
+}
+
+func cmdAdminActivate(args []string) {
+	fs := flag.NewFlagSet("admin activate", flag.ExitOnError)
+	target := fs.String("target", "", "address of cluster node (required)")
+	nodeID := fs.String("node-id", "", "ID of node to activate (required)")
+	fs.Parse(args)
+
+	if *target == "" || *nodeID == "" {
+		fmt.Fprintln(os.Stderr, "error: --target and --node-id are required")
+		os.Exit(1)
+	}
+
+	client, cleanup := adminClient(*target)
+	defer cleanup()
+
+	statusResp, err := client.GetClusterStatus(context.Background(), &pb.GetClusterStatusRequest{})
+	if err != nil {
+		log.Fatalf("get cluster status: %v", err)
+	}
+	version := statusResp.RingDescriptor.GetVersion()
+
+	_, err = client.ActivateNode(context.Background(), &pb.ActivateNodeRequest{
+		NodeId:          *nodeID,
+		ExpectedVersion: version,
+	})
+	if err != nil {
+		log.Fatalf("activate node: %v", err)
+	}
+	fmt.Printf("node %q activated (ring version: %d)\n", *nodeID, version+1)
+}
+
+func cmdAdminRemove(args []string) {
+	fs := flag.NewFlagSet("admin remove", flag.ExitOnError)
+	target := fs.String("target", "", "address of cluster node (required)")
+	nodeID := fs.String("node-id", "", "ID of node to remove (required)")
+	fs.Parse(args)
+
+	if *target == "" || *nodeID == "" {
+		fmt.Fprintln(os.Stderr, "error: --target and --node-id are required")
+		os.Exit(1)
+	}
+
+	client, cleanup := adminClient(*target)
+	defer cleanup()
+
+	statusResp, err := client.GetClusterStatus(context.Background(), &pb.GetClusterStatusRequest{})
+	if err != nil {
+		log.Fatalf("get cluster status: %v", err)
+	}
+	version := statusResp.RingDescriptor.GetVersion()
+
+	_, err = client.RemoveNode(context.Background(), &pb.RemoveNodeRequest{
+		NodeId:          *nodeID,
+		ExpectedVersion: version,
+	})
+	if err != nil {
+		log.Fatalf("remove node: %v", err)
+	}
+	fmt.Printf("node %q removed (ring version: %d)\n", *nodeID, version+1)
+}
+
 // --- Display helpers ---
 
 func livenessStr(l int32) string {
