@@ -235,6 +235,57 @@ func (n *Node) Start(ctx context.Context) error {
 	return nil
 }
 
+// Stop shuts down the node in reverse startup order, ensuring in-flight
+// RPCs complete before dependencies are torn down.
+func (n *Node) Stop() {
+	n.logger.Info("node stopping", "node_id", n.cfg.NodeID)
+
+	// 1. Stop accepting new RPCs, drain in-flight.
+	if n.srv != nil {
+		n.srv.GracefulStop()
+	}
+	// 2. Stop drainer (waits for in-flight drains).
+	if n.drainer != nil {
+		n.drainer.Stop()
+	}
+	// 3. Stop SWIM probe loop.
+	if n.membership != nil {
+		n.membership.Stop()
+	}
+	// 4. Close peer connections.
+	if n.peerPool != nil {
+		n.peerPool.Close()
+	}
+	// 5. Close hint store.
+	if n.hintStore != nil {
+		if err := n.hintStore.Close(); err != nil {
+			n.logger.Error("close hint store", "err", err)
+		}
+	}
+	// 6. Close vector store (release HNSW memory).
+	if n.vectorStore != nil {
+		if err := n.vectorStore.Close(); err != nil {
+			n.logger.Error("close vector store", "err", err)
+		}
+	}
+	// 7. Close the main database.
+	if n.database != nil {
+		if err := n.database.Close(); err != nil {
+			n.logger.Error("close database", "err", err)
+		}
+	}
+
+	n.logger.Info("node stopped", "node_id", n.cfg.NodeID)
+}
+
+// Addr returns the actual listener address (resolved from :0 if needed).
+func (n *Node) Addr() string {
+	if n.listener != nil {
+		return n.listener.Addr().String()
+	}
+	return n.cfg.Addr
+}
+
 // --- Adapters ---
 
 // membershipAdapter bridges cluster.Membership to hintedhandoff.MembershipQuerier.
