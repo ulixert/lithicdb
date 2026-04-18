@@ -20,11 +20,15 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 
 	"github.com/ulixert/theseon/cluster"
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/node"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"github.com/ulixert/theseon/server"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
@@ -149,5 +153,83 @@ func runStandalone(ctx context.Context, addr, dataDir string) {
 	// Serve returns after GracefulStop completes - safe to close DB.
 	if err := database.Close(); err != nil {
 		log.Printf("close database: %v", err)
+	}
+}
+
+// --- Admin commands ---
+
+func adminClient(target string) (pb.AdminServiceClient, func()) {
+	conn, err := grpc.NewClient(target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Fatalf("connect to %s: %v", target, err)
+	}
+	return pb.NewAdminServiceClient(conn), func() { conn.Close() }
+}
+
+func cmdAdminStatus(args []string) {
+	fs := flag.NewFlagSet("admin status", flag.ExitOnError)
+	target := fs.String("target", "", "address of cluster node (required)")
+	fs.Parse(args)
+
+	if *target == "" {
+		fmt.Fprintln(os.Stderr, "error: --target is required")
+		os.Exit(1)
+	}
+
+	client, cleanup := adminClient(*target)
+	defer cleanup()
+
+	resp, err := client.GetClusterStatus(context.Background(), &pb.GetClusterStatusRequest{})
+	if err != nil {
+		log.Fatalf("get cluster status: %v", err)
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "NODE ID\tADDRESS\tLIVENESS\tRING STATE")
+	for _, m := range resp.Members {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			m.NodeId, m.Addr,
+			livenessStr(m.Liveness), ringStateStr(m.RingState))
+	}
+	w.Flush()
+
+	if resp.RingDescriptor != nil {
+		fmt.Printf("\nRing version: %d\n", resp.RingDescriptor.Version)
+		if len(resp.RingDescriptor.Members) > 0 {
+			fmt.Println("Ring members:")
+			for _, rm := range resp.RingDescriptor.Members {
+				fmt.Printf("  %s (%s) - %s\n", rm.NodeId, rm.Addr, ringStateStr(rm.RingState))
+			}
+		}
+	}
+}
+
+// --- Display helpers ---
+
+func livenessStr(l int32) string {
+	switch cluster.LivenessState(l) {
+	case cluster.Alive:
+		return "alive"
+	case cluster.Suspect:
+		return "suspect"
+	case cluster.Dead:
+		return "dead"
+	default:
+		return fmt.Sprintf("unknown(%d)", l)
+	}
+}
+
+func ringStateStr(s int32) string {
+	switch cluster.RingState(s) {
+	case cluster.RingNone:
+		return "none"
+	case cluster.RingJoining:
+		return "joining"
+	case cluster.RingActive:
+		return "active"
+	default:
+		return fmt.Sprintf("unknown(%d)", s)
 	}
 }
