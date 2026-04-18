@@ -1,54 +1,90 @@
-// Command theseon starts a standalone gRPC server backed by a Theseon
-// storage engine. Graceful shutdown on SIGINT/SIGTERM drains in-flight
-// RPCs before closing the database.
+// Command theseon starts a theseon node in standalone or cluster mode
+// and provides admin subcommands for cluster management.
 //
 // Usage:
 //
-//	theseon -addr=:50051 -data-dir=./data
+//	theseon serve [flags]          - start a node
+//	theseon admin status [flags]   - print cluster status
+//	theseon admin join [flags]     - add node to ring as JOINING
+//	theseon admin activate [flags] - transition JOINING → ACTIVE
+//	theseon admin remove [flags]   - remove node from ring
 package main
 
 import (
-	"flag"
+	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/server"
 )
 
 func main() {
-	addr := flag.String("addr", ":50051", "gRPC listen address")
-	dataDir := flag.String("data-dir", "./data", "database directory")
-	flag.Parse()
+	if len(os.Args) < 2 {
+		usage()
+	}
 
-	opts := db.DefaultOptions(*dataDir)
+	switch os.Args[1] {
+	case "serve":
+		cmdServe(os.Args[2:])
+	case "admin":
+		if len(os.Args) < 3 {
+			adminUsage()
+		}
+		switch os.Args[2] {
+		case "status":
+			cmdAdminStatus(os.Args[3:])
+		case "join":
+			cmdAdminJoin(os.Args[3:])
+		case "activate":
+			cmdAdminActivate(os.Args[3:])
+		case "remove":
+			cmdAdminRemove(os.Args[3:])
+		default:
+			adminUsage()
+		}
+	default:
+		usage()
+	}
+}
 
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: theseon <command> [flags]")
+	fmt.Fprintln(os.Stderr, "commands: serve, admin")
+	os.Exit(1)
+}
+
+func adminUsage() {
+	fmt.Fprintln(os.Stderr, "usage: theseon admin <command> [flags]")
+	fmt.Fprintln(os.Stderr, "commands: status, join, activate, remove")
+	os.Exit(1)
+}
+
+// runStandalone starts a standalone (non-clustered) theseon server.
+func runStandalone(ctx context.Context, addr, dataDir string) {
+	opts := db.DefaultOptions(dataDir)
 	database, err := db.Open(opts)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
 
-	lis, err := net.Listen("tcp", *addr)
+	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		_ = database.Close()
-		log.Fatalf("listen %s: %v", *addr, err)
+		log.Fatalf("listen %s: %v", addr, err)
 	}
 
 	srv := server.New(database, nil)
 
-	// Graceful shutdown on SIGINT/SIGTERM.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		sig := <-sigCh
-		log.Printf("received %v, shutting down...", sig)
+		<-ctx.Done()
+		log.Println("shutting down...")
 		srv.GracefulStop()
 	}()
 
-	log.Printf("theseon listening on %s (data: %s)", *addr, *dataDir)
+	log.Printf("theseon standalone listening on %s (data: %s)", addr, dataDir)
 	if err := srv.Serve(lis); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
