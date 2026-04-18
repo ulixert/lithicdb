@@ -18,6 +18,7 @@ import (
 	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"github.com/ulixert/theseon/server"
 	"github.com/ulixert/theseon/vector"
+	"google.golang.org/protobuf/proto"
 )
 
 // Config configures a cluster node.
@@ -252,4 +253,37 @@ func (a *membershipAdapter) GetMemberInfos() []hintedhandoff.MemberInfo {
 		infos[i] = hintedhandoff.MemberInfo{NodeID: ms.NodeID, Addr: ms.Addr}
 	}
 	return infos
+}
+
+// envelopeDecoder adapts cluster.DecodeEnvelope to hintedhandoff.EnvelopeDecoder.
+func envelopeDecoder(b []byte) (hintedhandoff.DecodedEnvelope, error) {
+	env, err := cluster.DecodeEnvelope(b)
+	if err != nil {
+		return hintedhandoff.DecodedEnvelope{}, err
+	}
+	return hintedhandoff.DecodedEnvelope{
+		Timestamp: env.Timestamp,
+		Deleted:   env.Deleted,
+		Value:     env.Value,
+	}, nil
+}
+
+// vectorWriteReplayFunc replays a vector write hint to a target replica.
+func vectorWriteReplayFunc(ctx context.Context, client pb.InternalServiceClient, payload []byte) error {
+	req := &pb.ReplicateVectorWriteRequest{}
+	if err := proto.Unmarshal(payload, req); err != nil {
+		return fmt.Errorf("unmarshal vector write hint: %w", err)
+	}
+	_, err := client.ReplicateVectorWrite(ctx, req)
+	return err
+}
+
+// vectorDeleteReplayFunc replays a vector delete hint to a target replica.
+func vectorDeleteReplayFunc(ctx context.Context, client pb.InternalServiceClient, payload []byte) error {
+	req := &pb.ReplicateVectorDeleteRequest{}
+	if err := proto.Unmarshal(payload, req); err != nil {
+		return fmt.Errorf("unmarshal vector delete hint: %w", err)
+	}
+	_, err := client.ReplicateVectorDelete(ctx, req)
+	return err
 }
