@@ -233,3 +233,23 @@ func (n *Node) Start(ctx context.Context) error {
 	)
 	return nil
 }
+
+// --- Adapters ---
+
+// membershipAdapter bridges cluster.Membership to hintedhandoff.MembershipQuerier.
+type membershipAdapter struct {
+	m *cluster.Membership
+}
+
+func (a *membershipAdapter) IsAlive(nodeID string) bool {
+	return a.m.IsAlive(nodeID)
+}
+
+func (a *membershipAdapter) GetMemberInfos() []hintedhandoff.MemberInfo {
+	members := a.m.GetMembers()
+	infos := make([]hintedhandoff.MemberInfo, len(members))
+	for i, ms := range members {
+		infos[i] = hintedhandoff.MemberInfo{NodeID: ms.NodeID, Addr: ms.Addr}
+	}
+	return infos
+}
