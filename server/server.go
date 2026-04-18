@@ -120,6 +120,12 @@ func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server 
 	return s
 }
 
+// RegisterService registers an additional gRPC service on the server.
+// Must be called before Serve.
+func (s *Server) RegisterService(sd *grpc.ServiceDesc, ss interface{}) {
+	s.gs.RegisterService(sd, ss)
+}
+
 // Serve starts the gRPC server on the given listener. It blocks until
 // the server is stopped via GracefulStop or the listener fails.
 func (s *Server) Serve(lis net.Listener) error {

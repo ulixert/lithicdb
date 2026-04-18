@@ -288,6 +288,7 @@ message GetClusterStatusResponse {
 message JoinRingRequest {
   string addr = 1;              // address of the node to join
   uint64 expected_version = 2;  // CAS guard: current ring descriptor version the caller expects
+  string node_id = 3;           // unique identifier of the node to join
 }
 message JoinRingResponse {
   string node_id = 1;
