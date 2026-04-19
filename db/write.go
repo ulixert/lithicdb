@@ -3,13 +3,18 @@ package db
 import (
 	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ulixert/theseon/kv"
 	"github.com/ulixert/theseon/memtable"
+	"github.com/ulixert/theseon/metrics"
 )
 
 // Put inserts or updates a key-value pair.
 // Blocks if there are too many unflushed memtables (backpressure).
 func (db *DB) Put(key, value []byte) error {
+	timer := prometheus.NewTimer(metrics.KVWriteLatency.WithLabelValues("put"))
+	defer timer.ObserveDuration()
+
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -30,12 +35,16 @@ func (db *DB) Put(key, value []byte) error {
 		}
 	}
 
+	metrics.KVWrites.WithLabelValues("put", db.opts.Mode).Inc()
 	return nil
 }
 
 // Delete marks a key as deleted.
 // Blocks if there are too many unflushed memtables (backpressure).
 func (db *DB) Delete(key []byte) error {
+	timer := prometheus.NewTimer(metrics.KVWriteLatency.WithLabelValues("delete"))
+	defer timer.ObserveDuration()
+
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -56,6 +65,7 @@ func (db *DB) Delete(key []byte) error {
 		}
 	}
 
+	metrics.KVWrites.WithLabelValues("delete", db.opts.Mode).Inc()
 	return nil
 }
 

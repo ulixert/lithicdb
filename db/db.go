@@ -19,9 +19,10 @@ type Options struct {
 	Dir               string
 	MemtableSize      int64
 	BlockSize         int
-	BlockCacheSize    int64 // total block cache capacity in bytes (0 = 8MB default)
-	MaxImmutableCount int   // max unflushed memtables before writes block (0 = 5)
-	DisableWALSync    bool  // skip fsync on WAL writes - for ephemeral data where crash-loss is acceptable
+	BlockCacheSize    int64  // total block cache capacity in bytes (0 = 8MB default)
+	MaxImmutableCount int    // max unflushed memtables before writes block (0 = 5)
+	DisableWALSync    bool   // skip fsync on WAL writes - for ephemeral data where crash-loss is acceptable
+	Mode              string // metrics label: "standalone" | "cluster" | "replica" (defaults to "standalone")
 	Logger            *slog.Logger
 	Compaction        compaction.Config
 }
@@ -83,6 +84,10 @@ func Open(opts Options) (*DB, error) {
 		opts.MaxImmutableCount = 5
 	}
 
+	if opts.Mode == "" {
+		opts.Mode = "standalone"
+	}
+
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -112,6 +117,8 @@ func Open(opts Options) (*DB, error) {
 	db.wg.Add(2)
 	go db.flushLoop()
 	go db.compactionLoop()
+
+	db.updateSSTableGauge()
 
 	return db, nil
 }
