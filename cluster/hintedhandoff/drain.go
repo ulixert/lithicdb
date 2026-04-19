@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ulixert/theseon/hlc"
+	"github.com/ulixert/theseon/metrics"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
 )
 
@@ -243,10 +244,12 @@ func (d *Drainer) drainTarget(nodeID string) {
 			d.cfg.Logger.Warn("hint replay failed", "node", nodeID, "err", err)
 			// Retry with backoff
 			if !d.retryReplay(addr, batch) {
+				metrics.HintDrainBatches.WithLabelValues("failed").Inc()
 				d.cfg.Logger.Warn("giving up hint replay after retries", "node", nodeID)
 				return
 			}
 		}
+		metrics.HintDrainBatches.WithLabelValues("success").Inc()
 
 		// Delete replayed hints from the store.
 		for _, h := range batch {
