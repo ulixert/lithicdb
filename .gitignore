@@ -51,3 +51,7 @@ temp/
 # Theseon data directories (created during tests and local runs)
 data/
 testdata/
+
+# Benchmark datasets (SIFT-1M, etc.) and result CSVs
+benchmarks/data/
+benchmarks/out/
