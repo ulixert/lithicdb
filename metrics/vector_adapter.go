@@ -99,3 +99,30 @@ func (a *VectorAdapter) Gauge(name string, value float64, tags map[string]string
 	a.mu.Unlock()
 	gv.WithLabelValues(values(tags, keys)...).Set(value)
 }
+
+func (a *VectorAdapter) Histogram(name string, value float64, tags map[string]string) {
+	keys := sortedKeys(tags)
+	a.mu.Lock()
+	hv, ok := a.histograms[name]
+	if !ok {
+		hv = prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    promName(name),
+				Help:    "vector-store histogram",
+				Buckets: prometheus.ExponentialBuckets(100e-6, 2, 16),
+			},
+			keys,
+		)
+		if err := prometheus.Register(hv); err != nil {
+			if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
+				hv = are.ExistingCollector.(*prometheus.HistogramVec)
+			} else {
+				a.mu.Unlock()
+				return
+			}
+		}
+		a.histograms[name] = hv
+	}
+	a.mu.Unlock()
+	hv.WithLabelValues(values(tags, keys)...).Observe(value)
+}
