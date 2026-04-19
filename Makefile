@@ -1,4 +1,4 @@
-.PHONY: all build test test-v test-race bench lint fmt vet clean proto
+.PHONY: all build test test-v test-race test-integration test-integration-race bench lint fmt vet clean proto
 
 # Default: run all checks
 all: fmt vet lint test-race
@@ -19,6 +19,14 @@ test-v:
 # which matters a lot once you have background compaction and concurrent readers
 test-race:
 	go test -race ./...
+
+# Run integration tests
+test-integration:
+	go test -tags=integration ./node/...
+
+# Run integration tests with race detector
+test-integration-race:
+	go test -tags=integration -race ./node/...
 
 # Run benchmarks (no tests, just benchmarks)
 bench:
