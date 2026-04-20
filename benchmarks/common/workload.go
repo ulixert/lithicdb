@@ -5,8 +5,10 @@
 package common
 
 import (
+	"cmp"
 	"fmt"
 	"math/rand"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -212,4 +214,59 @@ func (w Workload) Run(kv KVClient) (Results, error) {
 	actualDuration := w.Duration
 
 	return summarize(w.Name, lats, errCount, actualDuration), nil
+}
+
+func validate(w Workload) error {
+	sum := w.ReadFrac + w.WriteFrac + w.DeleteFrac
+	if sum < 0.999 || sum > 1.001 {
+		return fmt.Errorf("workload %q: read+write+delete fractions = %v, want ~1.0", w.Name, sum)
+	}
+	if w.KeyspaceSize <= 0 {
+		return fmt.Errorf("workload %q: keyspace size must be > 0", w.Name)
+	}
+	if w.ValueSize < 0 {
+		return fmt.Errorf("workload %q: value size must be >= 0", w.Name)
+	}
+	if w.Duration <= 0 {
+		return fmt.Errorf("workload %q: duration must be > 0", w.Name)
+	}
+	return nil
+}
+
+func pickKey(rng *rand.Rand, zipf *rand.Zipf, keyspaceSize int) int {
+	if zipf != nil {
+		return int(zipf.Uint64())
+	}
+	return rng.Intn(keyspaceSize)
+}
+
+func summarize(name string, lats []time.Duration, errors int64, duration time.Duration) Results {
+	total := int64(len(lats)) + errors
+	r := Results{
+		Workload: name,
+		Errors:   errors,
+		TotalOps: total,
+		Duration: duration,
+	}
+	if total > 0 {
+		r.OpsPerSec = float64(total) / duration.Seconds()
+	}
+	if len(lats) > 0 {
+		slices.SortFunc(lats, func(a, b time.Duration) int { return cmp.Compare(a, b) })
+		r.P50 = lats[pIdx(len(lats), 0.50)]
+		r.P95 = lats[pIdx(len(lats), 0.95)]
+		r.P99 = lats[pIdx(len(lats), 0.99)]
+	}
+	return r
+}
+
+func pIdx(n int, q float64) int {
+	i := int(float64(n-1) * q)
+	if i < 0 {
+		return 0
+	}
+	if i >= n {
+		return n - 1
+	}
+	return i
 }
