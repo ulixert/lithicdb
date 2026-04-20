@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/csv"
 	"flag"
@@ -182,6 +183,56 @@ func (c *theseonClient) AwaitReady() error {
 }
 
 func (c *theseonClient) Close() error { return c.db.Close() }
+
+// pebbleClient adapts *pebble.DB to common.KVClient.
+type pebbleClient struct{ db *pebble.DB }
+
+func (c *pebbleClient) Put(k, v []byte) error {
+	return c.db.Set(k, v, pebble.Sync)
+}
+
+func (c *pebbleClient) Get(k []byte) ([]byte, bool, error) {
+	v, closer, err := c.db.Get(k)
+	if err == pebble.ErrNotFound {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	out := make([]byte, len(v))
+	copy(out, v)
+	_ = closer.Close()
+	return out, true, nil
+}
+
+func (c *pebbleClient) Delete(k []byte) error {
+	return c.db.Delete(k, pebble.Sync)
+}
+
+func (c *pebbleClient) PutBatch(keys, values [][]byte) error {
+	batch := c.db.NewBatch()
+	for i := range keys {
+		if err := batch.Set(keys[i], values[i], nil); err != nil {
+			return err
+		}
+	}
+	return c.db.Apply(batch, pebble.Sync)
+}
+
+// AwaitReady forces Pebble to flush the memtable and fully compact so the
+// measured window sees the same kind of LSM shape Theseon settles into.
+func (c *pebbleClient) AwaitReady() error {
+	if err := c.db.Flush(); err != nil {
+		return fmt.Errorf("flush: %w", err)
+	}
+	end := bytes.Repeat([]byte{0xff}, 32)
+	if err := c.db.Compact([]byte{0x00}, end, false); err != nil {
+		return fmt.Errorf("compact: %w", err)
+	}
+	return nil
+}
+
+func (c *pebbleClient) Close() error { return c.db.Close() }
 
 // medianResults picks the rep with the median OpsPerSec and returns it,
 // so p-percentile latency numbers come from a single coherent run rather
