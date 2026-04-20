@@ -29,6 +29,8 @@ import (
 	"github.com/ulixert/theseon/cluster"
 	"github.com/ulixert/theseon/node"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type quorum struct{ N, W, R int }
@@ -239,6 +241,114 @@ func startCluster(ctx context.Context, coordCfg cluster.CoordinatorConfig) (*tes
 
 	return cl, nil
 }
+
+type adminHandle struct {
+	c    pb.AdminServiceClient
+	conn *grpc.ClientConn
+}
+
+func (a *adminHandle) close() { _ = a.conn.Close() }
+
+func dialAdmin(addr string) (*adminHandle, error) {
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("admin dial %s: %w", addr, err)
+	}
+	return &adminHandle{c: pb.NewAdminServiceClient(conn), conn: conn}, nil
+}
+
+func waitForMembers(c pb.AdminServiceClient, want int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := c.GetClusterStatus(context.Background(), &pb.GetClusterStatusRequest{})
+		if err == nil && len(resp.Members) >= want {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout: want %d SWIM members", want)
+}
+
+func waitForRingVersion(c pb.AdminServiceClient, want uint64, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := c.GetClusterStatus(context.Background(), &pb.GetClusterStatusRequest{})
+		if err == nil && resp.RingDescriptor != nil && resp.RingDescriptor.Version >= want {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout: want ring version >= %d", want)
+}
+
+func joinAndActivate(c pb.AdminServiceClient, nodeID, addr string) error {
+	ctx := context.Background()
+	statusResp, err := c.GetClusterStatus(ctx, &pb.GetClusterStatusRequest{})
+	if err != nil {
+		return fmt.Errorf("status before join %s: %w", nodeID, err)
+	}
+	version := statusResp.RingDescriptor.GetVersion()
+	if _, err = c.JoinRing(ctx, &pb.JoinRingRequest{NodeId: nodeID, Addr: addr, ExpectedVersion: version}); err != nil {
+		return fmt.Errorf("join %s: %w", nodeID, err)
+	}
+	if _, err = c.ActivateNode(ctx, &pb.ActivateNodeRequest{NodeId: nodeID, ExpectedVersion: version + 1}); err != nil {
+		return fmt.Errorf("activate %s: %w", nodeID, err)
+	}
+	return nil
+}
+
+// --- KVClient over the Theseon gRPC service ---
+
+type clusterClient struct {
+	c    pb.TheseonClient
+	conn *grpc.ClientConn
+}
+
+func newClusterClient(addr string) (*clusterClient, error) {
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, err
+	}
+	return &clusterClient{c: pb.NewTheseonClient(conn), conn: conn}, nil
+}
+
+func (c *clusterClient) Put(key, value []byte) error {
+	_, err := c.c.Put(context.Background(), &pb.PutRequest{Key: key, Value: value})
+	return err
+}
+
+func (c *clusterClient) Get(key []byte) ([]byte, bool, error) {
+	resp, err := c.c.Get(context.Background(), &pb.GetRequest{Key: key})
+	if err != nil {
+		return nil, false, err
+	}
+	return resp.Value, resp.Found, nil
+}
+
+func (c *clusterClient) Delete(key []byte) error {
+	_, err := c.c.Delete(context.Background(), &pb.DeleteRequest{Key: key})
+	return err
+}
+
+func (c *clusterClient) PutBatch(keys, values [][]byte) error {
+	req := &pb.BatchWriteRequest{Entries: make([]*pb.BatchEntry, len(keys))}
+	for i := range keys {
+		req.Entries[i] = &pb.BatchEntry{Key: keys[i], Value: values[i]}
+	}
+	_, err := c.c.BatchWrite(context.Background(), req)
+	return err
+}
+
+// AwaitReady is a no-op at the cluster level: per-node compaction state is
+// best-effort, and the cluster settles quickly after prefill finishes because
+// replicated writes also go through local memtable + WAL on each replica.
+// A short sleep absorbs any in-flight replication tail.
+func (c *clusterClient) AwaitReady() error {
+	time.Sleep(2 * time.Second)
+	return nil
+}
+
+func (c *clusterClient) Close() error { return c.conn.Close() }
 
 // --- small utilities ---
 
