@@ -5,6 +5,10 @@
 package common
 
 import (
+	"fmt"
+	"math/rand"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,4 +62,154 @@ func YCSBB() Workload {
 }
 func YCSBC() Workload {
 	return Workload{Name: "YCSB-C", ReadFrac: 1.0, Concurrency: 1}
+}
+
+// Results summarize one measured run.
+type Results struct {
+	Workload  string
+	OpsPerSec float64
+	P50       time.Duration
+	P95       time.Duration
+	P99       time.Duration
+	Errors    int64
+	TotalOps  int64
+	Duration  time.Duration
+}
+
+// MakeKey returns a stable fixed-width key for index i. The 20-byte form is
+// long enough to avoid collisions across KeyspaceSize values yet short enough
+// to stay cache-friendly.
+func MakeKey(i int) []byte {
+	return []byte(fmt.Sprintf("key-%016d", i))
+}
+
+// MakeValue returns a fresh zero-filled value buffer of the requested size.
+// Zeros are fine: compression ratio is not a variable the benchmarks study,
+// and the engines handle the value as opaque bytes regardless of content.
+func MakeValue(size int) []byte {
+	return make([]byte, size)
+}
+
+// PreFill sequentially writes all keys in [0, keyspaceSize) with a fresh
+// value of valueSize bytes, then calls kv.AwaitReady(). Pre-fill time is not
+// reported - the caller's measured Run() comes after this returns.
+//
+// If kv implements BatchedKVClient, PreFill chunks writes so each chunk
+// incurs a single fsync. This is the difference between a PreFill that
+// finishes in seconds and one that dominates the benchmark runtime.
+func PreFill(kv KVClient, keyspaceSize, valueSize int) error {
+	val := MakeValue(valueSize)
+
+	if bkv, ok := kv.(BatchedKVClient); ok {
+		const chunkSize = 1024
+		keys := make([][]byte, 0, chunkSize)
+		vals := make([][]byte, 0, chunkSize)
+		for start := 0; start < keyspaceSize; start += chunkSize {
+			end := start + chunkSize
+			if end > keyspaceSize {
+				end = keyspaceSize
+			}
+			keys = keys[:0]
+			vals = vals[:0]
+			for j := start; j < end; j++ {
+				keys = append(keys, MakeKey(j))
+				vals = append(vals, val)
+			}
+			if err := bkv.PutBatch(keys, vals); err != nil {
+				return fmt.Errorf("prefill batch @%d: %w", start, err)
+			}
+		}
+	} else {
+		for i := 0; i < keyspaceSize; i++ {
+			if err := kv.Put(MakeKey(i), val); err != nil {
+				return fmt.Errorf("prefill key %d: %w", i, err)
+			}
+		}
+	}
+
+	if err := kv.AwaitReady(); err != nil {
+		return fmt.Errorf("prefill AwaitReady: %w", err)
+	}
+	return nil
+}
+
+// Run drives the configured workload against kv for w.Duration using
+// w.Concurrency workers. Each worker has its own RNG and latency buffer;
+// results are merged at return.
+func (w Workload) Run(kv KVClient) (Results, error) {
+	if err := validate(w); err != nil {
+		return Results{}, err
+	}
+
+	workers := w.Concurrency
+	if workers < 1 {
+		workers = 1
+	}
+
+	seed := w.Seed
+	if seed == 0 {
+		seed = time.Now().UnixNano()
+	}
+
+	deadline := time.Now().Add(w.Duration)
+	var (
+		wg       sync.WaitGroup
+		errCount int64
+		mu       sync.Mutex
+		lats     []time.Duration
+	)
+
+	val := MakeValue(w.ValueSize)
+
+	for w_ := 0; w_ < workers; w_++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			rng := rand.New(rand.NewSource(seed + int64(workerID)))
+			var zipf *rand.Zipf
+			if w.ZipfS > 1.0 {
+				zipf = rand.NewZipf(rng, w.ZipfS, 1.0, uint64(w.KeyspaceSize-1))
+			}
+
+			// Per-worker latency buffer to avoid contention; merged at end.
+			localLats := make([]time.Duration, 0, 1<<16)
+
+			readThresh := w.ReadFrac
+			writeThresh := w.ReadFrac + w.WriteFrac
+
+			for time.Now().Before(deadline) {
+				keyIdx := pickKey(rng, zipf, w.KeyspaceSize)
+				key := MakeKey(keyIdx)
+
+				opRoll := rng.Float64()
+				start := time.Now()
+				var err error
+				switch {
+				case opRoll < readThresh:
+					_, _, err = kv.Get(key)
+				case opRoll < writeThresh:
+					err = kv.Put(key, val)
+				default:
+					err = kv.Delete(key)
+				}
+				elapsed := time.Since(start)
+
+				if err != nil {
+					atomic.AddInt64(&errCount, 1)
+				} else {
+					localLats = append(localLats, elapsed)
+				}
+			}
+
+			mu.Lock()
+			lats = append(lats, localLats...)
+			mu.Unlock()
+		}(w_)
+	}
+
+	wg.Wait()
+	actualDuration := w.Duration
+
+	return summarize(w.Name, lats, errCount, actualDuration), nil
 }
