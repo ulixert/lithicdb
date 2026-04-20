@@ -27,6 +27,8 @@ import (
 
 	"github.com/ulixert/theseon/benchmarks/common"
 	"github.com/ulixert/theseon/cluster"
+	"github.com/ulixert/theseon/node"
+	pb "github.com/ulixert/theseon/proto/theseonpb"
 )
 
 type quorum struct{ N, W, R int }
@@ -115,6 +117,127 @@ func runOne(q quorum, wl common.Workload) (common.Results, error) {
 		return common.Results{}, fmt.Errorf("prefill: %w", err)
 	}
 	return wl.Run(kv)
+}
+
+// --- Cluster bring-up ---
+
+type testCluster struct {
+	nodes []*node.Node
+}
+
+func (c *testCluster) stop() {
+	for _, n := range c.nodes {
+		n.Stop()
+	}
+}
+
+func startCluster(ctx context.Context, coordCfg cluster.CoordinatorConfig) (*testCluster, error) {
+	// Fast gossip so ring formation completes quickly.
+	makeClusterCfg := func(id string) cluster.ClusterConfig {
+		cfg := cluster.DefaultClusterConfig(id, "")
+		cfg.GossipInterval = 100 * time.Millisecond
+		cfg.PingTimeout = 50 * time.Millisecond
+		cfg.SuspectTimeout = 500 * time.Millisecond
+		return cfg
+	}
+
+	dirs := make([]string, 3)
+	for i := range dirs {
+		d, err := os.MkdirTemp("", fmt.Sprintf("bench-cluster-n%d-", i+1))
+		if err != nil {
+			return nil, err
+		}
+		dirs[i] = d
+	}
+
+	n1 := node.New(node.Config{
+		NodeID:  "node-1",
+		Addr:    "127.0.0.1:0",
+		DataDir: dirs[0],
+		Cluster: makeClusterCfg("node-1"),
+		Coord:   coordCfg,
+	})
+	if err := n1.Start(ctx); err != nil {
+		return nil, fmt.Errorf("start node-1: %w", err)
+	}
+
+	n2 := node.New(node.Config{
+		NodeID:    "node-2",
+		Addr:      "127.0.0.1:0",
+		DataDir:   dirs[1],
+		SeedPeers: []string{n1.Addr()},
+		Cluster:   makeClusterCfg("node-2"),
+		Coord:     coordCfg,
+	})
+	if err := n2.Start(ctx); err != nil {
+		n1.Stop()
+		return nil, fmt.Errorf("start node-2: %w", err)
+	}
+
+	n3 := node.New(node.Config{
+		NodeID:    "node-3",
+		Addr:      "127.0.0.1:0",
+		DataDir:   dirs[2],
+		SeedPeers: []string{n1.Addr()},
+		Cluster:   makeClusterCfg("node-3"),
+		Coord:     coordCfg,
+	})
+	if err := n3.Start(ctx); err != nil {
+		n1.Stop()
+		n2.Stop()
+		return nil, fmt.Errorf("start node-3: %w", err)
+	}
+
+	cl := &testCluster{nodes: []*node.Node{n1, n2, n3}}
+
+	admin, err := dialAdmin(n1.Addr())
+	if err != nil {
+		cl.stop()
+		return nil, err
+	}
+	defer admin.close()
+
+	if err := waitForMembers(admin.c, 3, 10*time.Second); err != nil {
+		cl.stop()
+		return nil, err
+	}
+	for _, info := range []struct{ id, addr string }{
+		{"node-1", n1.Addr()}, {"node-2", n2.Addr()}, {"node-3", n3.Addr()},
+	} {
+		if err := joinAndActivate(admin.c, info.id, info.addr); err != nil {
+			cl.stop()
+			return nil, err
+		}
+	}
+
+	statusResp, err := admin.c.GetClusterStatus(context.Background(), &pb.GetClusterStatusRequest{})
+	if err != nil {
+		cl.stop()
+		return nil, fmt.Errorf("final status: %w", err)
+	}
+	wantVer := statusResp.RingDescriptor.Version
+	admin2, err := dialAdmin(n2.Addr())
+	if err != nil {
+		cl.stop()
+		return nil, err
+	}
+	defer admin2.close()
+	if err := waitForRingVersion(admin2.c, wantVer, 10*time.Second); err != nil {
+		cl.stop()
+		return nil, err
+	}
+	admin3, err := dialAdmin(n3.Addr())
+	if err != nil {
+		cl.stop()
+		return nil, err
+	}
+	defer admin3.close()
+	if err := waitForRingVersion(admin3.c, wantVer, 10*time.Second); err != nil {
+		cl.stop()
+		return nil, err
+	}
+
+	return cl, nil
 }
 
 // --- small utilities ---
