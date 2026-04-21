@@ -296,3 +296,125 @@ def chart_kv_chaos(df: pd.DataFrame) -> None:
 
     fig.tight_layout()
     save_figure(fig, "chart_kv_chaos.png")
+
+
+def chart_vector_recall_qps(df: pd.DataFrame) -> None:
+    """Render recall@10 vs QPS with ef_search annotations."""
+    require_columns(
+        df,
+        ["qps", "recall_at_10", "ef_search"],
+        "chart_vector_recall_qps",
+    )
+
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    color = ENGINE_COLORS["theseon"]
+
+    ax.plot(
+        df["qps"],
+        df["recall_at_10"],
+        "o-",
+        color=color,
+        lw=2,
+        markersize=8,
+    )
+
+    operating_points = {100: "balanced", 200: "high-recall"}
+
+    for _, row in df.iterrows():
+        ef_search = int(row["ef_search"])
+        qps = row["qps"]
+        recall = row["recall_at_10"]
+
+        ax.annotate(
+            f"ef={ef_search}",
+            (qps, recall),
+            textcoords="offset points",
+            xytext=(8, -4),
+            fontsize=9,
+        )
+
+        if ef_search in operating_points:
+            ax.plot(
+                [qps],
+                [recall],
+                "o",
+                color="#E07A5F",
+                markersize=14,
+                markerfacecolor="none",
+                markeredgewidth=2,
+            )
+            ax.annotate(
+                f"← {operating_points[ef_search]}",
+                (qps, recall),
+                textcoords="offset points",
+                xytext=(18, 6),
+                fontsize=10,
+                color="#C24E2C",
+                fontweight="bold",
+            )
+
+    ax.set_xlabel("queries per second")
+    ax.set_ylabel("recall@10")
+    ax.set_title("SIFT-1M single-node: recall vs QPS (Theseon HNSW)")
+    ax.grid(alpha=0.3)
+    ax.set_axisbelow(True)
+
+    fig.tight_layout()
+    save_figure(fig, "chart_vector_recall_qps.png")
+
+
+def chart_vector_latency(df: pd.DataFrame) -> None:
+    """Render tail latency percentiles vs ef_search."""
+    require_columns(
+        df,
+        ["ef_search", "p95_ms", "p99_ms"],
+        "chart_vector_latency",
+    )
+
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+
+    ax.plot(df["ef_search"], df["p95_ms"], "s-", label="p95", lw=2)
+    ax.plot(df["ef_search"], df["p99_ms"], "^-", label="p99", lw=2)
+
+    ax.set_xlabel("ef_search (higher = more candidates explored)")
+    ax.set_ylabel("latency (ms)")
+    ax.set_xscale("log")
+    ax.set_title("SIFT-1M single-node: search latency vs ef_search")
+    ax.grid(alpha=0.3, which="both")
+    ax.set_axisbelow(True)
+    ax.legend()
+
+    fig.tight_layout()
+    save_figure(fig, "chart_vector_latency.png")
+
+
+def render_csv(csv_name: str, charts: list[Callable[[pd.DataFrame], None]]) -> None:
+    """Load one CSV once, then run one or more chart renderers on it."""
+    print(f"plotting {csv_name}")
+    df = load_csv(csv_name)
+    if df is None:
+        return
+
+    for chart in charts:
+        try:
+            chart(df)
+        except Exception as exc:
+            print(f"[error] {chart.__name__}: {exc}", file=sys.stderr)
+
+
+def main() -> None:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    jobs: list[tuple[str, list[Callable[[pd.DataFrame], None]]]] = [
+        ("kv_single_node.csv", [chart_kv_single_node]),
+        ("kv_cluster.csv", [chart_kv_cluster]),
+        ("kv_chaos.csv", [chart_kv_chaos]),
+        ("vector.csv", [chart_vector_recall_qps, chart_vector_latency]),
+    ]
+
+    for csv_name, charts in jobs:
+        render_csv(csv_name, charts)
+
+
+if __name__ == "__main__":
+    main()
