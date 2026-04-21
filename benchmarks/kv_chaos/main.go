@@ -16,11 +16,16 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ulixert/theseon/benchmarks/common"
@@ -67,6 +72,153 @@ func main() {
 		log.Fatalf("prefill: %v", err)
 	}
 	log.Printf("pre-fill done; starting chaos run for %v", *duration)
+
+	tl := newTimeline()
+
+	// Launch N workers driving YCSB-A against the coordinator.
+	val := common.MakeValue(*valueSize)
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for w := 0; w < *concurrency; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(id)))
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				keyIdx := rng.Intn(*keyspaceSize)
+				key := common.MakeKey(keyIdx)
+				var err error
+				if rng.Float64() < 0.5 {
+					_, _, err = coord.Get(key)
+				} else {
+					err = coord.Put(key, val)
+				}
+				if err != nil {
+					tl.incError()
+				} else {
+					tl.incOK()
+				}
+			}
+		}(w)
+	}
+
+	// Timeline sampler + chaos scheduler.
+	startT := time.Now()
+	killTimer := time.NewTimer(*killAt)
+	restartTimer := time.NewTimer(*restartAt)
+	endTimer := time.NewTimer(*duration)
+
+	// Snapshot of node-2 identity so we can rebuild it after kill.
+	killedAddr := cl.nodes[1].Addr()
+	killedDataDir := cl.dirs[1]
+	log.Printf("node-2 addr=%s datadir=%s", killedAddr, killedDataDir)
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	var pendingEvent string
+chaos:
+	for {
+		select {
+		case <-ticker.C:
+			tl.mark(time.Since(startT), pendingEvent)
+			pendingEvent = ""
+		case <-killTimer.C:
+			log.Printf("[%v] KILL node-2", time.Since(startT).Round(time.Millisecond))
+			cl.nodes[1].Stop()
+			cl.nodes[1] = nil
+			pendingEvent = "kill"
+		case <-restartTimer.C:
+			log.Printf("[%v] RESTART node-2", time.Since(startT).Round(time.Millisecond))
+			replacement, err := restartNodeTwo(ctx, cl, killedDataDir)
+			if err != nil {
+				log.Printf("restart node-2 failed: %v", err)
+			} else {
+				cl.nodes[1] = replacement
+				log.Printf("node-2 back at %s", replacement.Addr())
+			}
+			pendingEvent = "restart"
+		case <-endTimer.C:
+			break chaos
+		}
+	}
+
+	close(stop)
+	wg.Wait()
+
+	if err := tl.writeCSV(*outPath); err != nil {
+		log.Fatalf("write csv: %v", err)
+	}
+	log.Printf("timeline written to %s", *outPath)
+}
+
+// --- chaos timeline ---
+
+type timeline struct {
+	mu      sync.Mutex
+	okWin   int64 // atomic: successful ops in the current 1s window
+	errWin  int64
+	samples []sample
+}
+
+type sample struct {
+	T       time.Duration
+	OPS     int64
+	ErrRate float64
+	Event   string
+}
+
+func newTimeline() *timeline {
+	return &timeline{}
+}
+
+func (t *timeline) incOK()    { atomic.AddInt64(&t.okWin, 1) }
+func (t *timeline) incError() { atomic.AddInt64(&t.errWin, 1) }
+
+func (t *timeline) mark(at time.Duration, event string) {
+	ok := atomic.SwapInt64(&t.okWin, 0)
+	errs := atomic.SwapInt64(&t.errWin, 0)
+	total := ok + errs
+	errRate := 0.0
+	if total > 0 {
+		errRate = float64(errs) / float64(total)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.samples = append(t.samples, sample{
+		T:       at.Round(time.Second),
+		OPS:     ok,
+		ErrRate: errRate,
+		Event:   event,
+	})
+}
+
+func (t *timeline) writeCSV(path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := csv.NewWriter(f)
+	defer w.Flush()
+	_ = w.Write([]string{"t_seconds", "ops_per_sec", "error_rate", "event"})
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, s := range t.samples {
+		_ = w.Write([]string{
+			strconv.FormatInt(int64(s.T/time.Second), 10),
+			strconv.FormatInt(s.OPS, 10),
+			fmt.Sprintf("%.4f", s.ErrRate),
+			s.Event,
+		})
+	}
+	return nil
 }
 
 // --- cluster bring-up ---
@@ -172,6 +324,61 @@ func startCluster(ctx context.Context, coordCfg cluster.CoordinatorConfig) (*tes
 	}
 
 	return cl, nil
+}
+
+// restartNodeTwo brings up a replacement for the killed node-2, reusing the
+// same NodeID + data dir so it picks up where it left off. The address is
+// fresh because the port has been released; we re-issue admin Join+Activate
+// to update the ring descriptor with the new address.
+func restartNodeTwo(ctx context.Context, cl *testCluster, dataDir string) (*node.Node, error) {
+	n2 := node.New(node.Config{
+		NodeID:    "node-2",
+		Addr:      "127.0.0.1:0",
+		DataDir:   dataDir,
+		SeedPeers: []string{cl.nodes[0].Addr()},
+		Cluster:   makeClusterCfg("node-2"),
+		Coord:     cluster.DefaultCoordinatorConfig(),
+	})
+	if err := n2.Start(ctx); err != nil {
+		return nil, fmt.Errorf("start replacement: %w", err)
+	}
+
+	admin, err := dialAdmin(cl.nodes[0].Addr())
+	if err != nil {
+		n2.Stop()
+		return nil, err
+	}
+	defer admin.close()
+
+	if err := waitForMembers(admin.c, 3, 5*time.Second); err != nil {
+		// Non-fatal: SWIM may still be converging. The cluster already
+		// marked the old node-2 dead; the new one rejoins on its own.
+	}
+	// admin Remove + Join + Activate to rewrite ring membership with the
+	// new address.
+	statusResp, err := admin.c.GetClusterStatus(ctx, &pb.GetClusterStatusRequest{})
+	if err != nil {
+		n2.Stop()
+		return nil, err
+	}
+	version := statusResp.RingDescriptor.Version
+	_, _ = admin.c.RemoveNode(ctx, &pb.RemoveNodeRequest{NodeId: "node-2", ExpectedVersion: version})
+
+	statusResp, err = admin.c.GetClusterStatus(ctx, &pb.GetClusterStatusRequest{})
+	if err != nil {
+		n2.Stop()
+		return nil, err
+	}
+	version = statusResp.RingDescriptor.Version
+	if _, err := admin.c.JoinRing(ctx, &pb.JoinRingRequest{NodeId: "node-2", Addr: n2.Addr(), ExpectedVersion: version}); err != nil {
+		n2.Stop()
+		return nil, fmt.Errorf("join replacement: %w", err)
+	}
+	if _, err := admin.c.ActivateNode(ctx, &pb.ActivateNodeRequest{NodeId: "node-2", ExpectedVersion: version + 1}); err != nil {
+		n2.Stop()
+		return nil, fmt.Errorf("activate replacement: %w", err)
+	}
+	return n2, nil
 }
 
 // --- admin helpers ---
