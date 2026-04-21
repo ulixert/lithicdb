@@ -49,6 +49,7 @@ type Workload struct {
 	KeyspaceSize int           // number of distinct keys (keys are indexed 0..KeyspaceSize-1)
 	ValueSize    int           // bytes per value
 	Duration     time.Duration // measured run length
+	Warmup       time.Duration // pre-measurement warmup (same mix, results discarded); 0 to skip
 	Concurrency  int           // number of concurrent worker goroutines
 	ZipfS        float64       // >1.0 → zipfian with this `s` parameter; <=1.0 → uniform
 	Seed         int64         // RNG seed (0 → time-based)
@@ -138,11 +139,29 @@ func PreFill(kv KVClient, keyspaceSize, valueSize int) error {
 // Run drives the configured workload against kv for w.Duration using
 // w.Concurrency workers. Each worker has its own RNG and latency buffer;
 // results are merged at return.
+//
+// If w.Warmup > 0, the same mix is run first for that duration and its
+// results are discarded. This gives engines with cold caches (e.g. Pebble
+// right after a forced compaction) a fair chance to reach the steady-state
+// block-cache shape the measured window sees.
 func (w Workload) Run(kv KVClient) (Results, error) {
 	if err := validate(w); err != nil {
 		return Results{}, err
 	}
 
+	if w.Warmup > 0 {
+		warmup := w
+		warmup.Duration = w.Warmup
+		warmup.Warmup = 0
+		if _, err := warmup.runWindow(kv); err != nil {
+			return Results{}, fmt.Errorf("warmup: %w", err)
+		}
+	}
+	return w.runWindow(kv)
+}
+
+// runWindow executes a single measured window without warmup logic.
+func (w Workload) runWindow(kv KVClient) (Results, error) {
 	workers := w.Concurrency
 	if workers < 1 {
 		workers = 1
