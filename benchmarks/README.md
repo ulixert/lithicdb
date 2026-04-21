@@ -90,10 +90,23 @@ CSV columns: `ef_search,recall_at_10,qps,p50_ms,p95_ms,p99_ms,num_queries`.
 
 ## Charts
 
-`plot.py` is a standalone uv-managed script with inline dependency metadata. Run it with:
+`plot.py` can be run either with `uv` or with a standard Python virtual environment.
+
+### Option A: uv (recommended)
+
+`plot.py` includes inline dependency metadata, so `uv` can run it directly:
 
 ```sh
 uv run benchmarks/plot.py
+```
+
+### Option B: standard Python / pip
+
+```sh
+python3 -m venv benchmarks/.venv
+source benchmarks/.venv/bin/activate
+pip install -r benchmarks/requirements.txt
+python benchmarks/plot.py
 ```
 
 It scans `benchmarks/out/` and writes one PNG per chart:
@@ -110,6 +123,17 @@ If a CSV is missing, the corresponding chart is skipped.
 
 ## Full sweep
 
+Use the convenience wrapper:
+
+```sh
+bash benchmarks/run-sweep.sh
+bash benchmarks/run-sweep.sh --quick
+```
+
+The wrapper prefers `uv` for the plotting step and falls back to a standard Python virtual environment under `benchmarks/.venv` if `uv` is not installed.
+
+If you want to run each step manually, use:
+
 ```sh
 go run ./benchmarks/kv_single_node --duration=60s --keyspace-size=1000000 --reps=3
 go run ./benchmarks/kv_cluster --duration=60s --keyspace-size=100000 --reps=3
@@ -118,11 +142,13 @@ go run ./benchmarks/vector
 uv run benchmarks/plot.py
 ```
 
-Or use the convenience wrapper:
+If `uv` is not installed, render the charts with a standard Python environment instead:
 
 ```sh
-bash benchmarks/run-sweep.sh
-bash benchmarks/run-sweep.sh --quick
+python3 -m venv benchmarks/.venv
+source benchmarks/.venv/bin/activate
+pip install -r benchmarks/requirements.txt
+python benchmarks/plot.py
 ```
 
 Total runtime on an M1 Mac is roughly 90–120 minutes end-to-end depending on disk speed, with most of the time spent in single-node pre-fill and SIFT-1M HNSW indexing.

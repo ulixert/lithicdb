@@ -10,7 +10,14 @@
 """Render benchmark charts from CSV output.
 
 Usage:
-    uv run benchmarks/plot.py
+    Option A — uv (recommended):
+        uv run benchmarks/plot.py
+
+    Option B — standard Python / pip:
+        python3 -m venv benchmarks/.venv
+        source benchmarks/.venv/bin/activate
+        pip install -r benchmarks/requirements.txt
+        python benchmarks/plot.py
 
 Reads CSV files from benchmarks/out/ and writes PNG files next to them.
 """

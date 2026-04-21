@@ -69,8 +69,17 @@ go run ./benchmarks/vector "${VEC_ARGS[@]}" 2>&1 | tee -a "$LOG"
 say "<<< vector done"
 
 say ">>> plot.py"
-uv run --with matplotlib --with pandas --with numpy \
-  python benchmarks/plot.py 2>&1 | tee -a "$LOG"
+if command -v uv >/dev/null 2>&1; then
+  uv run benchmarks/plot.py 2>&1 | tee -a "$LOG"
+elif command -v python3 >/dev/null 2>&1; then
+  if [[ ! -x benchmarks/.venv/bin/python ]]; then
+    python3 -m venv benchmarks/.venv 2>&1 | tee -a "$LOG"
+  fi
+  benchmarks/.venv/bin/python -m pip install -r benchmarks/requirements.txt 2>&1 | tee -a "$LOG"
+  benchmarks/.venv/bin/python benchmarks/plot.py 2>&1 | tee -a "$LOG"
+else
+  say "plot skipped: need either uv or python3"
+fi
 say "<<< plot done"
 
 say "=== sweep complete; CSVs + PNGs in benchmarks/out/ ==="
