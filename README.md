@@ -24,8 +24,9 @@ external libraries.
 The latest post in the series. Four benchmark harnesses, five charts, and a debugging story.
 
 - **Single-node**: Theseon matches Pebble on read throughput (~430K ops/sec) under equal cache budgets.
-- **Cluster & chaos**: 3-node cluster sustains ~1.7K ops/sec on read-heavy workloads at N=3/W=2/R=2, and errors return to 0% within ~1 s of a killed-and-restarted node.
+- **Cluster & chaos**: 3-node cluster sustains ~1.9K ops/sec on read-heavy workloads at N=3/W=2/R=2, and **client-visible error rate stays at 0% throughout a 60-second node outage** — quorum masks the failure completely.
 - **Vector**: HNSW on SIFT-1M hits **95% recall@10 at ~830 QPS**, with SIMD identified as the next major bottleneck.
+- **Debugging story**: the first cluster run reported 100% errors on one quorum config. Tracing it revealed a `BatchWrite` handler silently bypassing the coordinator, not the read path I was investigating. Details in the post.
 
 <p align="center">
   <img src="./docs/benchmarks/chart_kv_chaos.png" alt="Chaos run: node-2 killed and restarted mid-load" width="900">
@@ -145,8 +146,8 @@ func main() {
 }
 ```
 
-Vectors are stored as regular KV entries — they survive restarts via WAL replay and reuse the same quorum
-replication, hinted handoff, and anti-entropy paths as the rest of the KV engine.
+Vectors are stored as regular KV entries — they survive restarts via WAL replay and will flow through quorum
+replication, hinted handoff, and anti-entropy automatically.
 
 ### Distributed search via gRPC
 
@@ -396,7 +397,7 @@ client.Get("user:1234") → any node (becomes the coordinator)
 
 ### Internal Key Format
 
-Every key stored in Theseon is an *internal key*: the user's key bytes followed by an 8-byte *inverted* sequence
+Every key stored in Theseon is an _internal key_: the user's key bytes followed by an 8-byte _inverted_ sequence
 number (`math.MaxUint64 - seq`, big-endian). Inverting the sequence number means `bytes.Compare` on internal keys gives
 the right ordering for free: ascending by user key, then descending by sequence number (newest version first). This
 avoids a custom comparator — the entire read path (skip list, SSTable binary search, merge iterator) uses plain
@@ -505,12 +506,13 @@ fsync-bound on both engines; YCSB-C measures read-path efficiency.
 
 | Workload | ops/sec | p50 | p99 |
 |---|---|---|---|
-| YCSB-A | 196 | 18 ms | 91 ms |
-| YCSB-B | 1,687 | 1.4 ms | 18 ms |
-| YCSB-C | 22,800 | 0.33 ms | 0.74 ms |
+| YCSB-A | 185 | 18 ms | 97 ms |
+| YCSB-B | 1,900 | 3.2 ms | 22 ms |
+| YCSB-C | 24,500 | 0.30 ms | 0.81 ms |
 
-**Chaos**: node-2 killed at t=60s, restarted at t=120s. Error rate returns to 0% within ~1s of restart;
-throughput recovers to baseline within a few seconds.
+**Chaos**: node-2 killed at t=60s, restarted at t=120s. **Client-visible error rate stays at 0% throughout
+the full 60-second outage** — quorum coordination masks the failure to clients entirely. Throughput settles
+back to baseline within seconds of the replacement rejoining.
 
 **Vector (SIFT-1M, HNSW M=16, EfConstruct=200, 5000 queries per point)**:
 
