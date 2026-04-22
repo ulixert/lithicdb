@@ -42,6 +42,8 @@ func main() {
 	reps := flag.Int("reps", 3, "repetitions per (quorum,workload); medians reported")
 	concurrency := flag.Int("concurrency", 8, "concurrent worker goroutines; higher hides per-op RPC latency")
 	outPath := flag.String("out", "benchmarks/out/kv_cluster.csv", "output CSV path")
+	quorumFilter := flag.String("quorum", "", "optional filter: \"N,W,R\" (e.g. \"3,1,3\") to run only one quorum config")
+	workloadFilter := flag.String("workload", "", "optional filter: YCSB-A | YCSB-B | YCSB-C")
 	flag.Parse()
 
 	if err := os.MkdirAll(filepath.Dir(*outPath), 0o755); err != nil {
@@ -59,6 +61,26 @@ func main() {
 
 	quorums := []quorum{{3, 2, 2}, {3, 3, 1}, {3, 1, 3}}
 	workloads := []common.Workload{common.YCSBA(), common.YCSBB(), common.YCSBC()}
+
+	if *quorumFilter != "" {
+		var parsed quorum
+		if _, err := fmt.Sscanf(*quorumFilter, "%d,%d,%d", &parsed.N, &parsed.W, &parsed.R); err != nil {
+			log.Fatalf("parse --quorum=%q: %v", *quorumFilter, err)
+		}
+		quorums = []quorum{parsed}
+	}
+	if *workloadFilter != "" {
+		var filtered []common.Workload
+		for _, w := range workloads {
+			if w.Name == *workloadFilter {
+				filtered = append(filtered, w)
+			}
+		}
+		if len(filtered) == 0 {
+			log.Fatalf("--workload=%q matched none of YCSB-A/B/C", *workloadFilter)
+		}
+		workloads = filtered
+	}
 
 	for _, q := range quorums {
 		for _, wl := range workloads {
