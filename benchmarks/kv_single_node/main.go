@@ -32,6 +32,7 @@ import (
 
 func main() {
 	duration := flag.Duration("duration", 60*time.Second, "measured-run duration per (engine,workload,rep)")
+	warmup := flag.Duration("warmup", 15*time.Second, "pre-measurement warmup (same mix, discarded); evens out cold-cache artifacts after Pebble's forced compact")
 	keyspaceSize := flag.Int("keyspace-size", 1_000_000, "number of distinct keys to pre-fill")
 	valueSize := flag.Int("value-size", 256, "value size in bytes")
 	reps := flag.Int("reps", 3, "repetitions per (engine,workload); medians reported")
@@ -60,6 +61,7 @@ func main() {
 			wl.KeyspaceSize = *keyspaceSize
 			wl.ValueSize = *valueSize
 			wl.Duration = *duration
+			wl.Warmup = *warmup
 			wl.Concurrency = *concurrency
 
 			var perRep []common.Results
@@ -117,7 +119,13 @@ func openEngine(name, dir string) (common.KVClient, error) {
 		}
 		return &theseonClient{db: d}, nil
 	case "pebble":
+		// Block cache sized to hold the full 2M × 256B working set plus
+		// headroom. Without this, Pebble's default (~8MB) bottlenecks reads
+		// on syscall-per-block-miss while Theseon's mmap'd SSTables enjoy
+		// free OS page cache. Matching caches lets the comparison measure
+		// engine code paths, not cache policy.
 		p, err := pebble.Open(dir, &pebble.Options{
+			Cache:                     pebble.NewCache(1 << 30),
 			MemTableSize:              64 << 20,
 			L0CompactionFileThreshold: 4,
 			LBaseMaxBytes:             256 << 20,
