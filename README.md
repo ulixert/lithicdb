@@ -525,6 +525,8 @@ back to baseline within seconds of the replacement rejoining.
 📊 **[Full benchmark analysis (blog post)](https://ulixert.github.io/posts/theseon-benchmarks/)** — methodology,
 the (3,1,3) null-result debugging story, comparison to hnswlib, and what's next.
 
+🔬 **[Per-operation microbenchmarks](BENCHMARKS.md)** — `go test -bench` numbers for individual operations (memtable, SSTable, MVCC).
+
 **Observability**: Prometheus metrics at `/metrics` (configurable via `--metrics-addr`, default `:9090`).
 Eight core metrics cover KV read/write throughput and latency, compaction rate, SSTable count per level,
 hint drain progress, and replicate-RPC duration.
