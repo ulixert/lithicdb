@@ -3,8 +3,10 @@ package db
 import (
 	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ulixert/theseon/iterator"
 	"github.com/ulixert/theseon/kv"
+	"github.com/ulixert/theseon/metrics"
 	"github.com/ulixert/theseon/sstable"
 )
 
@@ -12,7 +14,22 @@ import (
 // Returns the value and true if found. If the key has been
 // deleted, returns a tombstone value with found=true.
 func (db *DB) Get(key []byte) (kv.Value, bool) {
-	return db.getAt(key, db.CurrentSeq())
+	timer := prometheus.NewTimer(metrics.KVReadLatency)
+	defer timer.ObserveDuration()
+
+	val, found := db.getAt(key, db.CurrentSeq())
+
+	result := "miss"
+	if found {
+		if val.Tombstone {
+			result = "tombstone"
+		} else {
+			result = "hit"
+		}
+	}
+	metrics.KVReads.WithLabelValues(result, db.opts.Mode).Inc()
+
+	return val, found
 }
 
 // Scan returns an iterator over all entries in sorted key order.

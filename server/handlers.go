@@ -94,9 +94,32 @@ func (s *Server) Scan(_ *pb.ScanRequest, stream pb.Theseon_ScanServer) error {
 	return nil
 }
 
-func (s *Server) BatchWrite(_ context.Context, req *pb.BatchWriteRequest) (*pb.BatchWriteResponse, error) {
-	batch := s.db.NewWriteBatch()
+func (s *Server) BatchWrite(ctx context.Context, req *pb.BatchWriteRequest) (*pb.BatchWriteResponse, error) {
+	// In cluster mode, each entry must go through the coordinator so it is
+	// envelope-encoded and replicated to the full replica set. Applying a
+	// local-only WriteBatch here would silently leave data unreplicated
+	// (readable only on the receiving node, and not envelope-wrapped, so
+	// cluster reads that expect envelopes would fail to decode).
+	if s.coordinator != nil {
+		for i, entry := range req.Entries {
+			if len(entry.Key) == 0 {
+				return nil, status.Errorf(codes.InvalidArgument, "entry %d: key must not be empty", i)
+			}
+			var err error
+			if entry.IsDelete {
+				err = s.coordinator.Delete(ctx, entry.Key)
+			} else {
+				err = s.coordinator.Write(ctx, entry.Key, entry.Value)
+			}
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "entry %d: %v", i, err)
+			}
+		}
+		return &pb.BatchWriteResponse{}, nil
+	}
 
+	// Standalone mode: use the fast local WriteBatch (one fsync per batch).
+	batch := s.db.NewWriteBatch()
 	for i, entry := range req.Entries {
 		if len(entry.Key) == 0 {
 			return nil, status.Errorf(codes.InvalidArgument, "entry %d: key must not be empty", i)
@@ -107,10 +130,8 @@ func (s *Server) BatchWrite(_ context.Context, req *pb.BatchWriteRequest) (*pb.B
 			batch.Put(entry.Key, entry.Value)
 		}
 	}
-
 	if err := batch.Commit(); err != nil {
 		return nil, status.Errorf(codes.Internal, "batch write: %v", err)
 	}
-
 	return &pb.BatchWriteResponse{}, nil
 }

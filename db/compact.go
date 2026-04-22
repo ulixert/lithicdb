@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/ulixert/theseon/compaction"
 	"github.com/ulixert/theseon/manifest"
+	"github.com/ulixert/theseon/metrics"
 	"github.com/ulixert/theseon/sstable"
 )
 
@@ -90,9 +92,33 @@ func (db *DB) runCompaction() {
 			return
 		}
 
+		metrics.Compactions.Inc()
+		db.updateSSTableGauge()
+
 		if db.onCompactionDone != nil {
 			db.onCompactionDone()
 		}
+	}
+}
+
+// updateSSTableGauge updates the per-level SSTable count gauge. Safe to call
+// without the DB mutex held; a torn read of lengths at most causes a gauge
+// sample to be one compaction out of date.
+func (db *DB) updateSSTableGauge() {
+	db.mu.RLock()
+	l0Count := len(db.l0)
+	levelCounts := make([]int, len(db.levels))
+	for i, level := range db.levels {
+		levelCounts[i] = len(level)
+	}
+	db.mu.RUnlock()
+
+	metrics.SSTableCount.WithLabelValues("0").Set(float64(l0Count))
+	for i, n := range levelCounts {
+		if i == 0 {
+			continue // L0 tracked separately above
+		}
+		metrics.SSTableCount.WithLabelValues(strconv.Itoa(i)).Set(float64(n))
 	}
 }
 

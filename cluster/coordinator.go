@@ -278,12 +278,23 @@ func (c *Coordinator) Read(ctx context.Context, key []byte) (ReadResult, error) 
 
 	for _, replica := range readable {
 		go func(node hashring.Node) {
+			start := time.Now()
 			var resp *pb.ReplicateReadResponse
 			var readErr error
 			if node.ID == c.selfID {
 				resp, readErr = c.localRead(key)
 			} else {
 				resp, readErr = c.remoteRead(ctx, node.Addr, key)
+			}
+			if readErr != nil {
+				c.logger.Warn("coord.Read per-replica failure",
+					"target", node.ID,
+					"self", c.selfID,
+					"local", node.ID == c.selfID,
+					"elapsed", time.Since(start),
+					"err_type", fmt.Sprintf("%T", readErr),
+					"err", readErr.Error(),
+				)
 			}
 			results <- replicaReadResult{node.ID, node.Addr, resp, readErr}
 		}(replica)
@@ -306,6 +317,14 @@ func (c *Coordinator) Read(ctx context.Context, key []byte) (ReadResult, error) 
 	}
 
 	if len(quorumResponses) < c.cfg.ReadQuorum {
+		c.logger.Warn("coord.Read quorum-not-met",
+			"self", c.selfID,
+			"R", c.cfg.ReadQuorum,
+			"readable", len(readable),
+			"responses", len(quorumResponses),
+			"failures", failures,
+			"maxFailures", maxFailures,
+		)
 		return ReadResult{}, fmt.Errorf("%w: got %d/%d responses: %v",
 			ErrReadQuorumNotMet, len(quorumResponses), c.cfg.ReadQuorum, errors.Join(errs...))
 	}

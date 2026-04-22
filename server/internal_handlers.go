@@ -5,9 +5,11 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ulixert/theseon/cluster"
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hlc"
+	"github.com/ulixert/theseon/metrics"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"github.com/ulixert/theseon/vector"
 	"google.golang.org/grpc/codes"
@@ -68,6 +70,8 @@ func (s *internalServer) GossipSync(_ context.Context, req *pb.GossipSyncRequest
 // physical clock, the write is rejected. The coordinator won't count this
 // replica's ack. Anti-entropy will repair the divergence later.
 func (s *internalServer) ReplicateWrite(_ context.Context, req *pb.ReplicateWriteRequest) (*pb.ReplicateWriteResponse, error) {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("replicate_write"))
+	defer timer.ObserveDuration()
 	if s.clock == nil || s.db == nil {
 		return nil, status.Error(codes.Unavailable, "replication not configured")
 	}
@@ -110,6 +114,8 @@ func (s *internalServer) ReplicateWrite(_ context.Context, req *pb.ReplicateWrit
 // The clock is synchronized once with the highest timestamp in the batch,
 // rather than per-entry, to avoid inflating the logical counter by N.
 func (s *internalServer) ReplicateWriteBatch(_ context.Context, req *pb.ReplicateWriteBatchRequest) (*pb.ReplicateWriteBatchResponse, error) {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("replicate_write_batch"))
+	defer timer.ObserveDuration()
 	if s.clock == nil || s.db == nil {
 		return nil, status.Error(codes.Unavailable, "replication not configured")
 	}
@@ -166,6 +172,8 @@ func (s *internalServer) ReplicateWriteBatch(_ context.Context, req *pb.Replicat
 // ReplicateRead returns the envelope metadata for a single key. Used by
 // the coordinator for quorum reads and read repair.
 func (s *internalServer) ReplicateRead(_ context.Context, req *pb.ReplicateReadRequest) (*pb.ReplicateReadResponse, error) {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("replicate_read"))
+	defer timer.ObserveDuration()
 	if s.clock == nil || s.db == nil {
 		return nil, status.Error(codes.Unavailable, "replication not configured")
 	}
@@ -194,6 +202,8 @@ func (s *internalServer) ReplicateRead(_ context.Context, req *pb.ReplicateReadR
 // --- Vector replication handlers ---
 
 func (s *internalServer) ReplicateVectorWrite(_ context.Context, req *pb.ReplicateVectorWriteRequest) (*pb.ReplicateVectorWriteResponse, error) {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("replicate_vector_write"))
+	defer timer.ObserveDuration()
 	if s.vectorStore == nil {
 		return nil, status.Error(codes.Unavailable, "vector store not configured")
 	}
@@ -236,6 +246,8 @@ func (s *internalServer) ReplicateVectorWrite(_ context.Context, req *pb.Replica
 }
 
 func (s *internalServer) ReplicateVectorDelete(_ context.Context, req *pb.ReplicateVectorDeleteRequest) (*pb.ReplicateVectorDeleteResponse, error) {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("replicate_vector_delete"))
+	defer timer.ObserveDuration()
 	if s.vectorStore == nil {
 		return nil, status.Error(codes.Unavailable, "vector store not configured")
 	}
@@ -276,6 +288,8 @@ func (s *internalServer) ReplicateVectorDelete(_ context.Context, req *pb.Replic
 }
 
 func (s *internalServer) ReplicateVectorSearch(ctx context.Context, req *pb.ReplicateVectorSearchRequest) (*pb.ReplicateVectorSearchResponse, error) {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("replicate_vector_search"))
+	defer timer.ObserveDuration()
 	if s.vectorStore == nil {
 		return nil, status.Error(codes.Unavailable, "vector store not configured")
 	}

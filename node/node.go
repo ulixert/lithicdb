@@ -15,6 +15,7 @@ import (
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hashring"
 	"github.com/ulixert/theseon/hlc"
+	"github.com/ulixert/theseon/metrics"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"github.com/ulixert/theseon/server"
 	"github.com/ulixert/theseon/vector"
@@ -132,6 +133,7 @@ func (n *Node) Start(ctx context.Context) error {
 	// 1. Open the main database.
 	opts := db.DefaultOptions(n.cfg.DataDir)
 	opts.Logger = n.logger
+	opts.Mode = "cluster"
 	database, err := db.Open(opts)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
@@ -144,7 +146,12 @@ func (n *Node) Start(ctx context.Context) error {
 	})
 
 	// 2. Create the vector store.
-	vs, err := vector.NewVectorStore(database, n.cfg.Vector, vector.WithLogger(n.logger))
+	vs, err := vector.NewVectorStore(
+		database,
+		n.cfg.Vector,
+		vector.WithLogger(n.logger),
+		vector.WithMetrics(metrics.NewVectorAdapter()),
+	)
 	if err != nil {
 		cleanup()
 		return fmt.Errorf("create vector store: %w", err)

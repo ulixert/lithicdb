@@ -8,14 +8,38 @@ A distributed LSM-tree storage engine with native vector search, built from scra
 
 Every core component — skip list, WAL, SSTable format, bloom filter, merge iterator, leveled compaction, snapshot
 isolation, optimistic transactions — is hand-built. The distributed layer — consistent hashing, hybrid logical clocks,
-SWIM gossip, quorum coordination, hinted handoff, node orchestration, admin CLI — is equally from scratch (merkle-tree
-anti-entropy is the next milestone). The vector search layer — HNSW index, binary vector encoding, snapshot persistence,
-distributed fan-out with exact rerank — is built on the same foundation: vectors are regular KV entries, so replication
-and repair come for free. Only gRPC and protobuf use external libraries.
+SWIM gossip, quorum coordination, hinted handoff, merkle-tree anti-entropy — is equally from scratch. The vector search
+layer — HNSW index, binary vector encoding, snapshot persistence, metadata filtering, distributed fan-out — is built on
+the same foundation: vectors are regular KV entries, so replication and repair come for free. Only gRPC and protobuf use
+external libraries.
 
-> "Theseon" comes from the Greek *Theseion* — the Temple of Hephaestus in Athens, one of the best-preserved ancient
+> "Theseon" comes from the Greek _Theseion_ — the Temple of Hephaestus in Athens, one of the best-preserved ancient
 > structures. It also evokes Theseus navigating the labyrinth, which is roughly what HNSW does: traversing layers of
 > connections to find nearby vectors.
+
+---
+
+### 📊 [Benchmarking Theseon: KV, Cluster, Chaos, and HNSW on SIFT-1M](https://ulixert.github.io/posts/theseon-benchmarks/)
+
+The latest post in the series. Four benchmark harnesses, five charts, and a debugging story.
+
+- **Single-node**: Theseon matches Pebble on read throughput (~430K ops/sec) under equal cache budgets.
+- **Cluster & chaos**: 3-node cluster sustains ~1.9K ops/sec on read-heavy workloads at N=3/W=2/R=2, and **client-visible error rate stays at 0% throughout a 60-second node outage** — quorum masks the failure completely.
+- **Vector**: HNSW on SIFT-1M hits **95% recall@10 at ~830 QPS**, with SIMD identified as the next major bottleneck.
+- **Debugging story**: the first cluster run reported 100% errors on one quorum config. Tracing it revealed a `BatchWrite` handler silently bypassing the coordinator, not the read path I was investigating. Details in the post.
+
+<p align="center">
+  <img src="./docs/benchmarks/chart_kv_chaos.png" alt="Chaos run: node-2 killed and restarted mid-load" width="900">
+</p>
+
+<p align="center">
+  <img src="./docs/benchmarks/chart_kv_single_node.png" alt="Single-node throughput + p99: Theseon vs Pebble" width="445">
+  <img src="./docs/benchmarks/chart_vector_recall_qps.png" alt="SIFT-1M recall vs QPS" width="445">
+</p>
+
+See the [full post](https://ulixert.github.io/posts/theseon-benchmarks/) for methodology, the (3,1,3) null-result debugging story, and what I'd do next. Harnesses live in [`benchmarks/`](benchmarks/README.md) and are reproducible end-to-end.
+
+---
 
 ## Blog Posts
 
@@ -31,6 +55,8 @@ and repair come for free. Only gRPC and protobuf use external libraries.
 10. [Making Vectors Durable: KV Integration, Snapshot Persistence, and the Bugs Along the Way](https://ulixert.github.io/posts/theseon-vector-kv-integration/)
 11. [Fan-Out, Merge, Repair: Distributed Vector Search](https://ulixert.github.io/posts/theseon-distributed-vector-search/)
 12. [Starting, Joining, Activating: The Node Orchestrator](https://ulixert.github.io/posts/theseon-node-orchestrator/)
+13. [Benchmarking Theseon: KV, Cluster, Chaos, and HNSW on SIFT-1M](https://ulixert.github.io/posts/theseon-benchmarks/)
+
 
 ## Getting Started
 
@@ -120,8 +146,8 @@ func main() {
 }
 ```
 
-Vectors are stored as regular KV entries — they survive restarts via WAL replay and flow through quorum
-replication and hinted handoff automatically (anti-entropy is the next milestone).
+Vectors are stored as regular KV entries — they survive restarts via WAL replay and will flow through quorum
+replication, hinted handoff, and anti-entropy automatically.
 
 ### Distributed search via gRPC
 
@@ -130,9 +156,9 @@ collection name to the ring, fans out to all readable replicas, and merges resul
 
 ```go
 import (
-"google.golang.org/grpc"
-"google.golang.org/grpc/credentials/insecure"
-pb "github.com/ulixert/theseon/proto/theseonpb"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials/insecure"
+    pb "github.com/ulixert/theseon/proto/theseonpb"
 )
 
 conn, _ := grpc.NewClient("localhost:50051",
@@ -371,7 +397,7 @@ client.Get("user:1234") → any node (becomes the coordinator)
 
 ### Internal Key Format
 
-Every key stored in Theseon is an *internal key*: the user's key bytes followed by an 8-byte *inverted* sequence
+Every key stored in Theseon is an _internal key_: the user's key bytes followed by an 8-byte _inverted_ sequence
 number (`math.MaxUint64 - seq`, big-endian). Inverting the sequence number means `bytes.Compare` on internal keys gives
 the right ordering for free: ascending by user key, then descending by sequence number (newest version first). This
 avoids a custom comparator — the entire read path (skip list, SSTable binary search, merge iterator) uses plain
@@ -462,31 +488,48 @@ These are deliberate scope boundaries, not oversights.
 
 ## Benchmarks
 
-**Single-node LSM engine only** — the numbers below cover the storage layer in isolation. Distributed cluster benchmarks
-(coordinator fan-out, quorum reads/writes, hinted handoff cost) and vector search benchmarks (HNSW recall/QPS, exact
-rerank latency, distributed search across replicas) are next up, now that the cluster is runnable end-to-end.
+Measured on an Apple M1 Air, 16 GB RAM, Go 1.26. Four harnesses live in [`benchmarks/`](benchmarks/README.md)
+and are reproducible end-to-end (see [benchmarks/run-sweep.sh](benchmarks/run-sweep.sh)).
 
-Measured on Apple M1, 4KB blocks, 8MB block cache, leveled compaction (v0.5.0, mmap reader).
+**Single-node** (2M keys × 256 B, matched 1 GB cache on both engines, 3-rep medians):
 
-| Operation                        | Throughput    | ns/op  |
-|----------------------------------|---------------|--------|
-| Put (sequential)                 | 263K ops/sec  | 3,797  |
-| Put (with flush + compaction)    | 251K ops/sec  | 3,984  |
-| Get — memtable hit               | 2.4M ops/sec  | 418    |
-| Get — SSTable hit (mmap)         | 1.1M ops/sec  | 1,092  |
-| Get — SSTable hit (warm cache)   | 1.2M ops/sec  | 1,008  |
-| Get — SSTable miss               | 836K ops/sec  | 1,461  |
-| Scan (10K keys)                  | 541 scans/sec | 1.8M   |
-| **MVCC**                         |               |        |
-| Snapshot Get                     | 3.2M ops/sec  | 331    |
-| Snapshot Scan (1K keys)          | 10K scans/sec | 98,392 |
-| Transaction (5 reads + 5 writes) | 289 txns/sec  | 3.5M   |
+| Workload | Theseon | Pebble | Delta |
+|---|---|---|---|
+| YCSB-A (50/50 r/w) | 497 ops/sec | 481 ops/sec | +3% |
+| YCSB-B (95/5 r/w)  | 4,670 ops/sec | 4,665 ops/sec | ~0% |
+| YCSB-C (100% read) | **430K ops/sec** | **414K ops/sec** | +4% |
 
-Snapshot Get is fast because `GetAt` uses the same skip list seek as regular Get — the only extra cost is comparing the
-sequence number. Transaction throughput is WAL-bound: each commit does one `fsync`. The conflict check (scanning
-active + immutable memtables) is negligible.
+Theseon matches Pebble within measurement noise under equivalent cache budgets. YCSB-A/B are
+fsync-bound on both engines; YCSB-C measures read-path efficiency.
 
-📊 **[Full benchmark analysis](BENCHMARKS.md)**
+**Cluster** (3-node in-process, 100K keys, N=3/W=2/R=2, 3-rep medians):
+
+| Workload | ops/sec | p50 | p99 |
+|---|---|---|---|
+| YCSB-A | 185 | 18 ms | 97 ms |
+| YCSB-B | 1,900 | 3.2 ms | 22 ms |
+| YCSB-C | 24,500 | 0.30 ms | 0.81 ms |
+
+**Chaos**: node-2 killed at t=60s, restarted at t=120s. **Client-visible error rate stays at 0% throughout
+the full 60-second outage** — quorum coordination masks the failure to clients entirely. Throughput settles
+back to baseline within seconds of the replacement rejoining.
+
+**Vector (SIFT-1M, HNSW M=16, EfConstruct=200, 5000 queries per point)**:
+
+| ef_search | recall@10 | QPS | p99 |
+|---|---|---|---|
+| 100 | **95.4%** | **831** | 1.76 ms ← balanced |
+| 200 | 97.7% | 479 | 3.06 ms ← high-recall |
+| 1000 | 99.4% | 133 | 11.7 ms |
+
+📊 **[Full benchmark analysis (blog post)](https://ulixert.github.io/posts/theseon-benchmarks/)** — methodology,
+the (3,1,3) null-result debugging story, comparison to hnswlib, and what's next.
+
+🔬 **[Per-operation microbenchmarks](BENCHMARKS.md)** — `go test -bench` numbers for individual operations (memtable, SSTable, MVCC).
+
+**Observability**: Prometheus metrics at `/metrics` (configurable via `--metrics-addr`, default `:9090`).
+Eight core metrics cover KV read/write throughput and latency, compaction rate, SSTable count per level,
+hint drain progress, and replicate-RPC duration.
 
 ## Features
 
@@ -522,7 +565,7 @@ active + immutable memtables) is negligible.
 ### Distributed Layer
 
 - [x] Standalone gRPC server wrapping `db.DB` (Put, Get, Delete, Scan)
-- [x] Consistent hash ring with virtual nodes (150 vnodes/node, SHA-256, atomic `ReplaceMembers`)
+- [x] Consistent hash ring with virtual nodes (150 vnodes/node, SHA-256)
 - [x] Hybrid logical clocks for cross-node timestamp ordering
 - [x] SWIM gossip protocol for decentralized failure detection
 - [x] Quorum coordinator with tunable R/W consistency (R + W > N)
@@ -532,7 +575,8 @@ active + immutable memtables) is negligible.
 - [x] Two-phase node join (JOINING → ACTIVE) via CAS-guarded admin commands
 - [x] `Node` orchestrator with ordered Start/Stop + rollback on partial failure
 - [x] Admin CLI for explicit topology management (status, join, activate, remove)
-- [x] Multi-node integration tests (3-node cluster with real TCP + SWIM + hinted handoff)
+- [x] Integration tests (cluster formation, hinted handoff) and chaos benchmark (kill + restart under load)
+- [x] Prometheus `/metrics` endpoint (KV throughput/latency, compactions, SSTable count, hint drain, RPC duration)
 - [ ] Merkle-tree anti-entropy with tombstone GC
 - [ ] Data streaming backfill to JOINING replicas (historical data migration)
 - [ ] Jepsen-style fault injection / chaos tests
@@ -593,33 +637,33 @@ make test-v       # verbose test output
 
 ## References
 
-- O'Neil, P., Cheng, E., Gawlick, D., & O'Neil, E. (1996). *The Log-Structured Merge-Tree (LSM-Tree)*. Acta Informatica,
+- O'Neil, P., Cheng, E., Gawlick, D., & O'Neil, E. (1996). _The Log-Structured Merge-Tree (LSM-Tree)_. Acta Informatica,
   33(4), 351–385.
 - DeCandia, G., Hastorun, D., Jampani, M., et al. (2007).
-  *[Dynamo: Amazon's Highly Available Key-Value Store](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf)*.
+  _[Dynamo: Amazon's Highly Available Key-Value Store](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf)_.
   SOSP '07.
 - Das, A., Gupta, I., & Motivala, A. (2002).
-  *[SWIM: Scalable Weakly-consistent Infection-style Process Group Membership Protocol](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf)*.
+  _[SWIM: Scalable Weakly-consistent Infection-style Process Group Membership Protocol](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf)_.
   DSN '02.
 - Kulkarni, S., Demirbas, M., et al. (2014).
-  *[Logical Physical Clocks and Consistent Snapshots in Globally Distributed Databases](https://cse.buffalo.edu/tech-reports/2014-04.pdf)*.
+  _[Logical Physical Clocks and Consistent Snapshots in Globally Distributed Databases](https://cse.buffalo.edu/tech-reports/2014-04.pdf)_.
   OPODIS '14.
 - Malkov, Y., & Yashunin, D. (2018).
-  *[Efficient and Robust Approximate Nearest Neighbor Using Hierarchical Navigable Small World Graphs](https://arxiv.org/abs/1603.09320)*.
+  _[Efficient and Robust Approximate Nearest Neighbor Using Hierarchical Navigable Small World Graphs](https://arxiv.org/abs/1603.09320)_.
   IEEE TPAMI.
-- Luo, C., & Carey, M. J. (2020). *[LSM-based Storage Techniques: A Survey](https://arxiv.org/abs/1812.07527)*. VLDB
+- Luo, C., & Carey, M. J. (2020). _[LSM-based Storage Techniques: A Survey](https://arxiv.org/abs/1812.07527)_. VLDB
   Journal, 29(1).
 - Lu, L., Pillai, T. S., et al. (2016).
-  *[WiscKey: Separating Keys from Values in SSD-Conscious Storage](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf)*.
+  _[WiscKey: Separating Keys from Values in SSD-Conscious Storage](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf)_.
   FAST '16.
 - Dayan, N., & Idreos, S. (2018).
-  *[Dostoevsky: Better Space-Time Trade-Offs for LSM-Tree Based Key-Value Stores](https://www.cs.bu.edu/faculty/mathan/publications/sigmod18-dostoevsky.pdf)*.
+  _[Dostoevsky: Better Space-Time Trade-Offs for LSM-Tree Based Key-Value Stores](https://www.cs.bu.edu/faculty/mathan/publications/sigmod18-dostoevsky.pdf)_.
   SIGMOD '18.
 - Dayan, N., Athanassoulis, M., & Idreos, S. (2017).
-  *[Monkey: Optimal Navigable Key-Value Store](https://stratos.seas.harvard.edu/files/stratos/files/monkeykeyvaluestore.pdf)*.
+  _[Monkey: Optimal Navigable Key-Value Store](https://stratos.seas.harvard.edu/files/stratos/files/monkeykeyvaluestore.pdf)_.
   SIGMOD '17.
-- Petrov, A. (2019). *Database Internals: A Deep Dive into How Distributed Data Systems Work*. O'Reilly.
-- Kleppmann, M. (2017). *Designing Data-Intensive Applications*. O'Reilly. Chapters 3 (Storage), 5 (Replication), and
+- Petrov, A. (2019). _Database Internals: A Deep Dive into How Distributed Data Systems Work_. O'Reilly.
+- Kleppmann, M. (2017). _Designing Data-Intensive Applications_. O'Reilly. Chapters 3 (Storage), 5 (Replication), and
   7 (Transactions).
 - [The Apache Cassandra Architecture](https://cassandra.apache.org/doc/latest/cassandra/architecture/) — Dynamo-inspired
   distributed architecture, gossip protocol, consistent hashing, hinted handoff, anti-entropy repair

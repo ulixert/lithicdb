@@ -12,18 +12,22 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/ulixert/theseon/cluster"
 	"github.com/ulixert/theseon/db"
+	"github.com/ulixert/theseon/metrics"
 	"github.com/ulixert/theseon/node"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
 	"github.com/ulixert/theseon/server"
@@ -83,10 +87,15 @@ func cmdServe(args []string) {
 	replFactor := fs.Int("replication-factor", 3, "replication factor (N)")
 	writeQuorum := fs.Int("write-quorum", 2, "write quorum (W)")
 	readQuorum := fs.Int("read-quorum", 2, "read quorum (R)")
+	metricsAddr := fs.String("metrics-addr", ":9090", "Prometheus metrics HTTP listen address (empty disables)")
 	fs.Parse(args)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	if *metricsAddr != "" {
+		startMetricsServer(ctx, *metricsAddr)
+	}
 
 	if *nodeID == "" {
 		// Standalone mode - no cluster.
@@ -121,6 +130,40 @@ func cmdServe(args []string) {
 	<-ctx.Done()
 	log.Println("shutting down...")
 	n.Stop()
+}
+
+// startMetricsServer starts the Prometheus /metrics HTTP server in a
+// goroutine. It shuts down when ctx is canceled. Returns after listening
+// (or after logging a listen failure).
+func startMetricsServer(ctx context.Context, addr string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", metrics.Handler())
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Printf("metrics server: listen %s: %v (metrics disabled)", addr, err)
+		return
+	}
+	log.Printf("theseon metrics listening on %s", lis.Addr())
+
+	go func() {
+		if err := srv.Serve(lis); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("metrics server: %v", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
 }
 
 // runStandalone starts a standalone (non-clustered) theseon server.
