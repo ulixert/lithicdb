@@ -231,6 +231,11 @@ def chart_kv_chaos(df: pd.DataFrame) -> None:
     ax_left.grid(alpha=0.3)
     ax_left.set_axisbelow(True)
 
+    ymin = float(df["ops_per_sec"].quantile(0.02))
+    ymax = float(df["ops_per_sec"].quantile(0.98))
+    pad = max(10.0, (ymax - ymin) * 0.12)
+    ax_left.set_ylim(ymin - pad, ymax + pad)
+
     ax_right: plt.Axes | None = None
     if "error_rate" in df.columns and (df["error_rate"] > 0).any():
         ax_right = ax_left.twinx()
