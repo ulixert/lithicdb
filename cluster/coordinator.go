@@ -255,25 +255,20 @@ func (c *Coordinator) Read(ctx context.Context, key []byte) (ReadResult, error) 
 
 	replicas := c.ring.GetNodes(key, c.cfg.ReplicationFactor)
 
-	// Filter to eligible replicas by ring state only: JOINING nodes receive
-	// writes but don't serve reads (they may not have all data yet). We do
-	// NOT filter by IsRoutable here: that liveness bit is flap-prone under
-	// load (SWIM pings can queue up and transiently mark alive replicas as
-	// suspect) and using it as a pre-dispatch gate caused R=N reads to
-	// fast-fail as soon as one replica hiccupped. Instead, dispatch to all
-	// eligible replicas and let the collection loop count per-RPC failures
-	// — mirroring the write path's behavior.
+	// Filter to readable replicas: routable AND not JOINING.
+	// JOINING nodes receive writes but don't serve reads (they may
+	// not have all data yet).
 	var readable []hashring.Node
 	for _, r := range replicas {
-		if c.membership.RingStateOf(r.ID) != RingJoining {
+		if c.membership.IsRoutable(r.ID) && c.membership.RingStateOf(r.ID) != RingJoining {
 			readable = append(readable, r)
 		}
 	}
 
 	// Same intentional semantics as writes: succeed with fewer than N
-	// active replicas as long as R can still be met.
+	// readable replicas as long as R can still be met.
 	if len(readable) < c.cfg.ReadQuorum {
-		return ReadResult{}, fmt.Errorf("%w: have %d active replicas, need %d",
+		return ReadResult{}, fmt.Errorf("%w: have %d readable replicas, need %d",
 			ErrReadQuorumNotMet, len(readable), c.cfg.ReadQuorum)
 	}
 
