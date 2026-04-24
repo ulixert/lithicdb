@@ -87,6 +87,114 @@ func TestGetNodesConsistentWithGetNode(t *testing.T) {
 	}
 }
 
+// coReplicasGroundTruth computes the authoritative co-replica set of
+// nodeID by probing many synthetic keys and taking the union of all
+// N-owner windows that contain nodeID. Used to verify Ring.CoReplicas.
+func coReplicasGroundTruth(r *Ring, nodeID string, n int) map[string]struct{} {
+	peers := make(map[string]struct{})
+	for i := 0; i < 50000; i++ {
+		key := []byte(fmt.Sprintf("ground-truth-probe-%d", i))
+		owners := r.GetNodes(key, n)
+		selfIn := false
+		for _, o := range owners {
+			if o.ID == nodeID {
+				selfIn = true
+				break
+			}
+		}
+		if !selfIn {
+			continue
+		}
+		for _, o := range owners {
+			if o.ID != nodeID {
+				peers[o.ID] = struct{}{}
+			}
+		}
+	}
+	return peers
+}
+
+func TestCoReplicas_NilOrUnknown(t *testing.T) {
+	r := New(150)
+	if got := r.CoReplicas("anything", 3); got != nil {
+		t.Errorf("empty ring: got %v, want nil", got)
+	}
+	r.AddNode(Node{ID: "a", Addr: "a:0"})
+	if got := r.CoReplicas("not-in-ring", 3); got != nil {
+		t.Errorf("unknown node: got %v, want nil", got)
+	}
+	if got := r.CoReplicas("a", 0); got != nil {
+		t.Errorf("n=0: got %v, want nil", got)
+	}
+}
+
+func TestCoReplicas_ThreeNodeN3_AllOthers(t *testing.T) {
+	r := New(150)
+	for _, id := range []string{"a", "b", "c"} {
+		r.AddNode(Node{ID: id, Addr: id + ":0"})
+	}
+	peers := r.CoReplicas("a", 3)
+	if len(peers) != 2 || peers[0] != "b" || peers[1] != "c" {
+		t.Errorf("got %v, want [b c] sorted", peers)
+	}
+}
+
+// TestCoReplicas_MatchesGroundTruth covers the class of undersampling
+// bug: a cheap sampling-based peer discovery will miss peers whose
+// vnode positions land in windows the samples don't hit. For each
+// node in a 10-node and a 20-node N=3 cluster, this test asserts that
+// Ring.CoReplicas returns EXACTLY the set produced by probing 50,000
+// random keys through GetNodes. The two must match completely — any
+// peer that ground-truth sees but CoReplicas misses would fail here.
+func TestCoReplicas_MatchesGroundTruth(t *testing.T) {
+	cases := []struct {
+		name      string
+		numNodes  int
+		replicasN int
+	}{
+		{"10_nodes_N3", 10, 3},
+		{"20_nodes_N3", 20, 3},
+		{"20_nodes_N5", 20, 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := New(150)
+			for i := 0; i < tc.numNodes; i++ {
+				id := fmt.Sprintf("node-%02d", i)
+				r.AddNode(Node{ID: id, Addr: id + ":0"})
+			}
+			for i := 0; i < tc.numNodes; i++ {
+				selfID := fmt.Sprintf("node-%02d", i)
+				truth := coReplicasGroundTruth(r, selfID, tc.replicasN)
+				got := r.CoReplicas(selfID, tc.replicasN)
+				gotSet := make(map[string]struct{}, len(got))
+				for _, p := range got {
+					gotSet[p] = struct{}{}
+				}
+				// CoReplicas must be a SUPERSET of truth (truth is
+				// lower-bounded by random sampling, CoReplicas is
+				// exhaustive).
+				for p := range truth {
+					if _, ok := gotSet[p]; !ok {
+						t.Errorf("%s: CoReplicas missed peer %q that ground truth found",
+							selfID, p)
+					}
+				}
+				// And every peer CoReplicas returns must be realizable
+				// as a co-replica — ground truth is expected to find
+				// them given 50k probes and uniform vnode distribution.
+				// Any peer in CoReplicas but not in truth is a bug.
+				for p := range gotSet {
+					if _, ok := truth[p]; !ok {
+						t.Errorf("%s: CoReplicas returned %q but ground truth never saw it in any window",
+							selfID, p)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestAddNodeMinimalDisruption(t *testing.T) {
 	r := New(150)
 	r.AddNode(Node{ID: "node-1", Addr: "10.0.0.1:9090"})
