@@ -121,3 +121,55 @@ func TestShouldReconcile_NilRing(t *testing.T) {
 		t.Error("nil ring should return false")
 	}
 }
+
+// TestOwnedPeers_TenNode_GroundTruth guards against sampling-based
+// undersampling regressions in OwnedPeers. A naive probe that only
+// sampled a few ring positions per member would miss peers whose
+// vnodes don't land in the sampled windows — this test builds a
+// 10-node N=3 cluster and asserts OwnedPeers returns at least every
+// peer found by brute-force key probing.
+func TestOwnedPeers_TenNode_GroundTruth(t *testing.T) {
+	t.Parallel()
+	ring := hashring.New(150)
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("n%02d", i)
+		ring.AddNode(hashring.Node{ID: id, Addr: id + ":0"})
+	}
+
+	for i := 0; i < 10; i++ {
+		selfID := fmt.Sprintf("n%02d", i)
+		// Ground truth: probe many keys and collect co-replicas seen.
+		truth := make(map[string]struct{})
+		for p := 0; p < 20000; p++ {
+			owners := ring.GetNodes([]byte(fmt.Sprintf("probe-%s-%d", selfID, p)), 3)
+			selfIn := false
+			for _, o := range owners {
+				if o.ID == selfID {
+					selfIn = true
+					break
+				}
+			}
+			if !selfIn {
+				continue
+			}
+			for _, o := range owners {
+				if o.ID != selfID {
+					truth[o.ID] = struct{}{}
+				}
+			}
+		}
+
+		got := OwnedPeers(ring, selfID, 3)
+		gotSet := make(map[string]struct{}, len(got))
+		for _, p := range got {
+			gotSet[p] = struct{}{}
+		}
+
+		for p := range truth {
+			if _, ok := gotSet[p]; !ok {
+				t.Errorf("%s: OwnedPeers missed peer %q (ground truth found it via random probes)",
+					selfID, p)
+			}
+		}
+	}
+}
