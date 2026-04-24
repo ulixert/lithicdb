@@ -23,14 +23,16 @@
 package antientropy
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/ulixert/theseon/hlc"
 )
 
 // ErrInvalidTreeParams indicates fanout or depth were out of range.
-var ErrInvalidTreeParams = errors.New("antientropy: invalid tree fanout/depth")
+var ErrInvalidTreeParams = errors.New("anti entropy: invalid tree fanout/depth")
 
 // Entry is a single (key, hlc, deleted) triple fed into a Merkle tree.
 // The value bytes are intentionally excluded: LWW conflict resolution
@@ -95,4 +97,158 @@ func NewTree(fanout, depth int) (*Tree, error) {
 		}
 	}
 	return t, nil
+}
+
+// Fanout returns the configured fanout.
+func (t *Tree) Fanout() int { return t.fanout }
+
+// Depth returns the configured depth.
+func (t *Tree) Depth() int { return t.depth }
+
+// NumLeaves returns fanout^depth.
+func (t *Tree) NumLeaves() int { return len(t.levels[t.depth]) }
+
+// Root returns the root hash. Only meaningful after Finalize().
+func (t *Tree) Root() uint64 { return t.levels[0][0] }
+
+// LeafHash returns the hash of the leaf at the given bucket index.
+func (t *Tree) LeafHash(idx int) uint64 { return t.levels[t.depth][idx] }
+
+// BucketFor returns the leaf bucket index for the given user key.
+// The mapping is deterministic and identical across nodes with matching
+// fanout/depth parameters.
+func (t *Tree) BucketFor(key []byte) int {
+	return int(xxhash.Sum64(key) % uint64(t.NumLeaves()))
+}
+
+// PathForBucket decomposes a bucket index into a child-index path from
+// the root. len(path) == depth.
+func (t *Tree) PathForBucket(bucketIdx int) []int {
+	path := make([]int, t.depth)
+	n := bucketIdx
+	for i := t.depth - 1; i >= 0; i-- {
+		path[i] = n % t.fanout
+		n /= t.fanout
+	}
+	return path
+}
+
+// ChildrenAt returns the fanout child hashes of the internal node at
+// `path`. The path is a list of child indices from the root (length
+// 0 = root itself, returning its direct children).
+//
+// Returns an error if the path is invalid or points at a leaf.
+func (t *Tree) ChildrenAt(path []int) ([]uint64, error) {
+	if len(path) < 0 || len(path) >= t.depth+1 {
+		return nil, fmt.Errorf("anti entropy: path len %d exceeds depth %d", len(path), t.depth)
+	}
+	if len(path) == t.depth {
+		return nil, errors.New("anti entropy: leaves have no children")
+	}
+	// Compute the node's flat index within its level from the root-to-node path.
+	idx := 0
+	for _, p := range path {
+		if p < 0 || p >= t.fanout {
+			return nil, fmt.Errorf("anti entropy: path element %d out of [0,%d)", p, t.fanout)
+		}
+		idx = idx*t.fanout + p
+	}
+
+	childLevel := t.levels[len(path)+1]
+	start := idx * t.fanout
+	return childLevel[start : start+t.fanout], nil
+}
+
+// AccumulateEntry mixes an entry into its bucket leaf via commutative
+// XOR. Safe to call in any order; the resulting leaf hash depends only
+// on the set of entries, not insertion order.
+func (t *Tree) AccumulateEntry(e Entry) {
+	bucket := t.BucketFor(e.Key)
+	t.levels[t.depth][bucket] ^= entryHash(e)
+}
+
+// Finalize propagates leaf hashes up the tree to compute internal
+// nodes and root. Must be called before Root/ChildrenAt return
+// meaningful values.
+func (t *Tree) Finalize() {
+	for level := t.depth - 1; level >= 0; level-- {
+		parent := t.levels[level]
+		child := t.levels[level+1]
+		for i := range parent {
+			parent[i] = hashChildren(child[i*t.fanout : (i+1)*t.fanout])
+		}
+	}
+}
+
+// BuildTree drains a Source, filtering out entries whose HLC wall time
+// is at or after graceCutoffWall (exclude in-flight writes from
+// divergence detection). The caller is responsible for supplying a
+// Source backed by snapshot-filtered storage.
+//
+// graceCutoffWall is in nanoseconds since epoch, matching hlc.Timestamp.WallTime.
+// Callers typically pass `time.Now().Add(-grace).UnixNano()` - entries
+// with WallTime < graceCutoffWall participate; younger ones are filtered.
+func BuildTree(src Source, graceCutoffWall int64, fanout, depth int) (*Tree, error) {
+	t, err := NewTree(fanout, depth)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		e, ok, err := src.Next()
+		if err != nil {
+			_ = src.Close()
+			return nil, err
+		}
+		if !ok {
+			break
+		}
+		if e.Timestamp.WallTime >= graceCutoffWall {
+			continue
+		}
+		t.AccumulateEntry(e)
+	}
+	if err := src.Close(); err != nil {
+		return nil, err
+	}
+	t.Finalize()
+	return t, nil
+}
+
+// entryHash hashes a (key, hlc, deleted) triple into a uint64 suitable
+// for XOR accumulation into a bucket. Value bytes are intentionally
+// excluded; LWW compares (ts, deleted) only.
+//
+// The hash must be stable across nodes and across time, so it uses
+// encoded HLC bytes rather than the Go struct layout.
+func entryHash(e Entry) uint64 {
+	keyH := xxhash.Sum64(e.Key)
+
+	// Encode the HLC timestamp into its canonical byte form so nodes
+	// with different Go padding / struct layouts still hash identically.
+	// HLC encode is only fallible on NodeID length > uint16 max — never
+	// true in practice. Ignore the error at this layer to keep the hot
+	// path allocation-light; callers validate upstream.
+	tsBytes, _ := e.Timestamp.Encode()
+	tsH := xxhash.Sum64(tsBytes)
+
+	var delByte uint64
+	if e.Deleted {
+		delByte = 1
+	}
+
+	// XOR-combine so each leaf bucket can accumulate entries in any
+	// order and still converge on the same hash.
+	return keyH ^ tsH ^ delByte
+}
+
+// hashChildren hashes the concatenation of child hashes (big-endian,
+// 8 bytes each) in order. This is position-sensitive: swapping two
+// children changes the parent hash, which is what we want for internal
+// nodes (to localize divergence to a specific child index).
+func hashChildren(children []uint64) uint64 {
+	buf := make([]byte, 8*len(children))
+	for i, h := range children {
+		binary.BigEndian.PutUint64(buf[i*8:], h)
+	}
+	return xxhash.Sum64(buf)
 }
