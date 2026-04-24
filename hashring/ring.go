@@ -152,6 +152,82 @@ func (r *Ring) GetNodes(key []byte, n int) []Node {
 	return result
 }
 
+// CoReplicas returns every node ID that shares at least one replica
+// set with nodeID under replication factor n. Two nodes co-replicate a
+// key iff both appear in the N distinct owners walked clockwise from
+// the key's hash. Authoritatively computed by inspecting every vnode
+// position on the ring — no sampling, no false negatives.
+//
+// Returns a sorted slice with nodeID excluded. Returns nil if nodeID
+// is not in the ring or n <= 0.
+//
+// Complexity: O(V * N) where V is the total number of vnodes. For a
+// typical 10-node cluster with 150 vnodes each and N=3, that's ~4500
+// lookups — fine for infrequent (per-reconcile or per-ring-change) use.
+func (r *Ring) CoReplicas(nodeID string, n int) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.vnodes) == 0 || n <= 0 {
+		return nil
+	}
+	if _, exists := r.nodes[nodeID]; !exists {
+		return nil
+	}
+	if n > len(r.nodes) {
+		n = len(r.nodes)
+	}
+
+	peers := make(map[string]struct{}, len(r.nodes)-1)
+	window := make([]string, 0, n)
+	seen := make(map[string]struct{}, n)
+
+	for startIdx := range r.vnodes {
+		window = window[:0]
+		for k := range seen {
+			delete(seen, k)
+		}
+		idx := startIdx
+		for range r.vnodes {
+			id := r.vnodes[idx].nodeID
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				window = append(window, id)
+				if len(window) == n {
+					break
+				}
+			}
+			idx = (idx + 1) % len(r.vnodes)
+		}
+
+		selfIn := false
+		for _, id := range window {
+			if id == nodeID {
+				selfIn = true
+				break
+			}
+		}
+		if !selfIn {
+			continue
+		}
+		for _, id := range window {
+			if id != nodeID {
+				peers[id] = struct{}{}
+			}
+		}
+	}
+
+	if len(peers) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(peers))
+	for p := range peers {
+		out = append(out, p)
+	}
+	slices.Sort(out)
+	return out
+}
+
 // Members returns all physical nodes currently in the ring.
 // The order is not guaranteed.
 func (r *Ring) Members() []Node {
