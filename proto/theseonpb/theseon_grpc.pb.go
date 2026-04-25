@@ -440,6 +440,9 @@ const (
 	InternalService_ReplicateVectorWrite_FullMethodName  = "/theseonpb.InternalService/ReplicateVectorWrite"
 	InternalService_ReplicateVectorDelete_FullMethodName = "/theseonpb.InternalService/ReplicateVectorDelete"
 	InternalService_ReplicateVectorSearch_FullMethodName = "/theseonpb.InternalService/ReplicateVectorSearch"
+	InternalService_ComputeAERoot_FullMethodName         = "/theseonpb.InternalService/ComputeAERoot"
+	InternalService_GetAESubtree_FullMethodName          = "/theseonpb.InternalService/GetAESubtree"
+	InternalService_GetAELeafKeys_FullMethodName         = "/theseonpb.InternalService/GetAELeafKeys"
 )
 
 // InternalServiceClient is the client API for InternalService service.
@@ -458,6 +461,10 @@ type InternalServiceClient interface {
 	ReplicateVectorWrite(ctx context.Context, in *ReplicateVectorWriteRequest, opts ...grpc.CallOption) (*ReplicateVectorWriteResponse, error)
 	ReplicateVectorDelete(ctx context.Context, in *ReplicateVectorDeleteRequest, opts ...grpc.CallOption) (*ReplicateVectorDeleteResponse, error)
 	ReplicateVectorSearch(ctx context.Context, in *ReplicateVectorSearchRequest, opts ...grpc.CallOption) (*ReplicateVectorSearchResponse, error)
+	// Anti-entropy RPCs - Merkle-tree reconciliation between co-replicas.
+	ComputeAERoot(ctx context.Context, in *AERootRequest, opts ...grpc.CallOption) (*AERootResponse, error)
+	GetAESubtree(ctx context.Context, in *AESubtreeRequest, opts ...grpc.CallOption) (*AESubtreeResponse, error)
+	GetAELeafKeys(ctx context.Context, in *AELeafRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[AELeafEntry], error)
 }
 
 type internalServiceClient struct {
@@ -558,6 +565,45 @@ func (c *internalServiceClient) ReplicateVectorSearch(ctx context.Context, in *R
 	return out, nil
 }
 
+func (c *internalServiceClient) ComputeAERoot(ctx context.Context, in *AERootRequest, opts ...grpc.CallOption) (*AERootResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AERootResponse)
+	err := c.cc.Invoke(ctx, InternalService_ComputeAERoot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalServiceClient) GetAESubtree(ctx context.Context, in *AESubtreeRequest, opts ...grpc.CallOption) (*AESubtreeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AESubtreeResponse)
+	err := c.cc.Invoke(ctx, InternalService_GetAESubtree_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalServiceClient) GetAELeafKeys(ctx context.Context, in *AELeafRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[AELeafEntry], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &InternalService_ServiceDesc.Streams[0], InternalService_GetAELeafKeys_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[AELeafRequest, AELeafEntry]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type InternalService_GetAELeafKeysClient = grpc.ServerStreamingClient[AELeafEntry]
+
 // InternalServiceServer is the server API for InternalService service.
 // All implementations must embed UnimplementedInternalServiceServer
 // for forward compatibility.
@@ -574,6 +620,10 @@ type InternalServiceServer interface {
 	ReplicateVectorWrite(context.Context, *ReplicateVectorWriteRequest) (*ReplicateVectorWriteResponse, error)
 	ReplicateVectorDelete(context.Context, *ReplicateVectorDeleteRequest) (*ReplicateVectorDeleteResponse, error)
 	ReplicateVectorSearch(context.Context, *ReplicateVectorSearchRequest) (*ReplicateVectorSearchResponse, error)
+	// Anti-entropy RPCs - Merkle-tree reconciliation between co-replicas.
+	ComputeAERoot(context.Context, *AERootRequest) (*AERootResponse, error)
+	GetAESubtree(context.Context, *AESubtreeRequest) (*AESubtreeResponse, error)
+	GetAELeafKeys(*AELeafRequest, grpc.ServerStreamingServer[AELeafEntry]) error
 	mustEmbedUnimplementedInternalServiceServer()
 }
 
@@ -610,6 +660,15 @@ func (UnimplementedInternalServiceServer) ReplicateVectorDelete(context.Context,
 }
 func (UnimplementedInternalServiceServer) ReplicateVectorSearch(context.Context, *ReplicateVectorSearchRequest) (*ReplicateVectorSearchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReplicateVectorSearch not implemented")
+}
+func (UnimplementedInternalServiceServer) ComputeAERoot(context.Context, *AERootRequest) (*AERootResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ComputeAERoot not implemented")
+}
+func (UnimplementedInternalServiceServer) GetAESubtree(context.Context, *AESubtreeRequest) (*AESubtreeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAESubtree not implemented")
+}
+func (UnimplementedInternalServiceServer) GetAELeafKeys(*AELeafRequest, grpc.ServerStreamingServer[AELeafEntry]) error {
+	return status.Error(codes.Unimplemented, "method GetAELeafKeys not implemented")
 }
 func (UnimplementedInternalServiceServer) mustEmbedUnimplementedInternalServiceServer() {}
 func (UnimplementedInternalServiceServer) testEmbeddedByValue()                         {}
@@ -794,6 +853,53 @@ func _InternalService_ReplicateVectorSearch_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InternalService_ComputeAERoot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AERootRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).ComputeAERoot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_ComputeAERoot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).ComputeAERoot(ctx, req.(*AERootRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InternalService_GetAESubtree_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AESubtreeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalServiceServer).GetAESubtree(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalService_GetAESubtree_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalServiceServer).GetAESubtree(ctx, req.(*AESubtreeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InternalService_GetAELeafKeys_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(AELeafRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(InternalServiceServer).GetAELeafKeys(m, &grpc.GenericServerStream[AELeafRequest, AELeafEntry]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type InternalService_GetAELeafKeysServer = grpc.ServerStreamingServer[AELeafEntry]
+
 // InternalService_ServiceDesc is the grpc.ServiceDesc for InternalService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -837,17 +943,32 @@ var InternalService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ReplicateVectorSearch",
 			Handler:    _InternalService_ReplicateVectorSearch_Handler,
 		},
+		{
+			MethodName: "ComputeAERoot",
+			Handler:    _InternalService_ComputeAERoot_Handler,
+		},
+		{
+			MethodName: "GetAESubtree",
+			Handler:    _InternalService_GetAESubtree_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "GetAELeafKeys",
+			Handler:       _InternalService_GetAELeafKeys_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "proto/theseonpb/theseon.proto",
 }
 
 const (
-	AdminService_GetNodeInfo_FullMethodName      = "/theseonpb.AdminService/GetNodeInfo"
-	AdminService_GetClusterStatus_FullMethodName = "/theseonpb.AdminService/GetClusterStatus"
-	AdminService_JoinRing_FullMethodName         = "/theseonpb.AdminService/JoinRing"
-	AdminService_ActivateNode_FullMethodName     = "/theseonpb.AdminService/ActivateNode"
-	AdminService_RemoveNode_FullMethodName       = "/theseonpb.AdminService/RemoveNode"
+	AdminService_GetNodeInfo_FullMethodName        = "/theseonpb.AdminService/GetNodeInfo"
+	AdminService_GetClusterStatus_FullMethodName   = "/theseonpb.AdminService/GetClusterStatus"
+	AdminService_JoinRing_FullMethodName           = "/theseonpb.AdminService/JoinRing"
+	AdminService_ActivateNode_FullMethodName       = "/theseonpb.AdminService/ActivateNode"
+	AdminService_RemoveNode_FullMethodName         = "/theseonpb.AdminService/RemoveNode"
+	AdminService_TriggerAntiEntropy_FullMethodName = "/theseonpb.AdminService/TriggerAntiEntropy"
 )
 
 // AdminServiceClient is the client API for AdminService service.
@@ -859,6 +980,8 @@ type AdminServiceClient interface {
 	JoinRing(ctx context.Context, in *JoinRingRequest, opts ...grpc.CallOption) (*JoinRingResponse, error)
 	ActivateNode(ctx context.Context, in *ActivateNodeRequest, opts ...grpc.CallOption) (*ActivateNodeResponse, error)
 	RemoveNode(ctx context.Context, in *RemoveNodeRequest, opts ...grpc.CallOption) (*RemoveNodeResponse, error)
+	// Anti-entropy admin: trigger a reconcile against one or all peers.
+	TriggerAntiEntropy(ctx context.Context, in *TriggerAERequest, opts ...grpc.CallOption) (*TriggerAEResponse, error)
 }
 
 type adminServiceClient struct {
@@ -919,6 +1042,16 @@ func (c *adminServiceClient) RemoveNode(ctx context.Context, in *RemoveNodeReque
 	return out, nil
 }
 
+func (c *adminServiceClient) TriggerAntiEntropy(ctx context.Context, in *TriggerAERequest, opts ...grpc.CallOption) (*TriggerAEResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TriggerAEResponse)
+	err := c.cc.Invoke(ctx, AdminService_TriggerAntiEntropy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminServiceServer is the server API for AdminService service.
 // All implementations must embed UnimplementedAdminServiceServer
 // for forward compatibility.
@@ -928,6 +1061,8 @@ type AdminServiceServer interface {
 	JoinRing(context.Context, *JoinRingRequest) (*JoinRingResponse, error)
 	ActivateNode(context.Context, *ActivateNodeRequest) (*ActivateNodeResponse, error)
 	RemoveNode(context.Context, *RemoveNodeRequest) (*RemoveNodeResponse, error)
+	// Anti-entropy admin: trigger a reconcile against one or all peers.
+	TriggerAntiEntropy(context.Context, *TriggerAERequest) (*TriggerAEResponse, error)
 	mustEmbedUnimplementedAdminServiceServer()
 }
 
@@ -952,6 +1087,9 @@ func (UnimplementedAdminServiceServer) ActivateNode(context.Context, *ActivateNo
 }
 func (UnimplementedAdminServiceServer) RemoveNode(context.Context, *RemoveNodeRequest) (*RemoveNodeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveNode not implemented")
+}
+func (UnimplementedAdminServiceServer) TriggerAntiEntropy(context.Context, *TriggerAERequest) (*TriggerAEResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TriggerAntiEntropy not implemented")
 }
 func (UnimplementedAdminServiceServer) mustEmbedUnimplementedAdminServiceServer() {}
 func (UnimplementedAdminServiceServer) testEmbeddedByValue()                      {}
@@ -1064,6 +1202,24 @@ func _AdminService_RemoveNode_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminService_TriggerAntiEntropy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TriggerAERequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).TriggerAntiEntropy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_TriggerAntiEntropy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).TriggerAntiEntropy(ctx, req.(*TriggerAERequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminService_ServiceDesc is the grpc.ServiceDesc for AdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1090,6 +1246,10 @@ var AdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemoveNode",
 			Handler:    _AdminService_RemoveNode_Handler,
+		},
+		{
+			MethodName: "TriggerAntiEntropy",
+			Handler:    _AdminService_TriggerAntiEntropy_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -747,7 +747,7 @@ func (x *PingReqResponse) GetAck() bool {
 	return false
 }
 
-// GossipSync — full membership table exchange for discovery.
+// GossipSync - full membership table exchange for discovery.
 type GossipSyncRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	SenderId       string                 `protobuf:"bytes,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
@@ -2285,6 +2285,598 @@ func (x *ReplicateVectorSearchResponse) GetResults() []*VectorSearchResult {
 	return nil
 }
 
+// ---- Anti-entropy ----
+//
+// AEKeyspaceDigest pins the parameters of a reconciliation round.
+// Both sides build trees with identical fanout/depth and apply the
+// same grace_cutoff_wall filter. ring_version aborts the round if
+// either side has shifted ring topology mid-reconcile.
+type AEKeyspaceDigest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	RingVersion uint64                 `protobuf:"varint,1,opt,name=ring_version,json=ringVersion,proto3" json:"ring_version,omitempty"`
+	// Identifies BOTH endpoints unambiguously so each side can compute
+	// the "other" end and apply the symmetric (self, other) filter.
+	InitiatorId       string `protobuf:"bytes,2,opt,name=initiator_id,json=initiatorId,proto3" json:"initiator_id,omitempty"` // node that started this reconcile round
+	TargetId          string `protobuf:"bytes,3,opt,name=target_id,json=targetId,proto3" json:"target_id,omitempty"`          // node serving this RPC
+	Depth             uint32 `protobuf:"varint,4,opt,name=depth,proto3" json:"depth,omitempty"`
+	Fanout            uint32 `protobuf:"varint,5,opt,name=fanout,proto3" json:"fanout,omitempty"`
+	GraceCutoffWall   int64  `protobuf:"varint,6,opt,name=grace_cutoff_wall,json=graceCutoffWall,proto3" json:"grace_cutoff_wall,omitempty"`     // hlc.WallTime; entries with WallTime >= this are excluded
+	ReplicationFactor int32  `protobuf:"varint,7,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // N - must agree between sides
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *AEKeyspaceDigest) Reset() {
+	*x = AEKeyspaceDigest{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AEKeyspaceDigest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AEKeyspaceDigest) ProtoMessage() {}
+
+func (x *AEKeyspaceDigest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AEKeyspaceDigest.ProtoReflect.Descriptor instead.
+func (*AEKeyspaceDigest) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *AEKeyspaceDigest) GetRingVersion() uint64 {
+	if x != nil {
+		return x.RingVersion
+	}
+	return 0
+}
+
+func (x *AEKeyspaceDigest) GetInitiatorId() string {
+	if x != nil {
+		return x.InitiatorId
+	}
+	return ""
+}
+
+func (x *AEKeyspaceDigest) GetTargetId() string {
+	if x != nil {
+		return x.TargetId
+	}
+	return ""
+}
+
+func (x *AEKeyspaceDigest) GetDepth() uint32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
+func (x *AEKeyspaceDigest) GetFanout() uint32 {
+	if x != nil {
+		return x.Fanout
+	}
+	return 0
+}
+
+func (x *AEKeyspaceDigest) GetGraceCutoffWall() int64 {
+	if x != nil {
+		return x.GraceCutoffWall
+	}
+	return 0
+}
+
+func (x *AEKeyspaceDigest) GetReplicationFactor() int32 {
+	if x != nil {
+		return x.ReplicationFactor
+	}
+	return 0
+}
+
+type AERootRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Digest        *AEKeyspaceDigest      `protobuf:"bytes,1,opt,name=digest,proto3" json:"digest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AERootRequest) Reset() {
+	*x = AERootRequest{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AERootRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AERootRequest) ProtoMessage() {}
+
+func (x *AERootRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AERootRequest.ProtoReflect.Descriptor instead.
+func (*AERootRequest) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *AERootRequest) GetDigest() *AEKeyspaceDigest {
+	if x != nil {
+		return x.Digest
+	}
+	return nil
+}
+
+type AERootResponse struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	RootHash            uint64                 `protobuf:"varint,1,opt,name=root_hash,json=rootHash,proto3" json:"root_hash,omitempty"`
+	RingVersionMismatch bool                   `protobuf:"varint,2,opt,name=ring_version_mismatch,json=ringVersionMismatch,proto3" json:"ring_version_mismatch,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *AERootResponse) Reset() {
+	*x = AERootResponse{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AERootResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AERootResponse) ProtoMessage() {}
+
+func (x *AERootResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AERootResponse.ProtoReflect.Descriptor instead.
+func (*AERootResponse) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *AERootResponse) GetRootHash() uint64 {
+	if x != nil {
+		return x.RootHash
+	}
+	return 0
+}
+
+func (x *AERootResponse) GetRingVersionMismatch() bool {
+	if x != nil {
+		return x.RingVersionMismatch
+	}
+	return false
+}
+
+type AESubtreeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Digest        *AEKeyspaceDigest      `protobuf:"bytes,1,opt,name=digest,proto3" json:"digest,omitempty"`
+	Path          []uint32               `protobuf:"varint,2,rep,packed,name=path,proto3" json:"path,omitempty"` // child indices from root; empty = root's direct children
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AESubtreeRequest) Reset() {
+	*x = AESubtreeRequest{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AESubtreeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AESubtreeRequest) ProtoMessage() {}
+
+func (x *AESubtreeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AESubtreeRequest.ProtoReflect.Descriptor instead.
+func (*AESubtreeRequest) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *AESubtreeRequest) GetDigest() *AEKeyspaceDigest {
+	if x != nil {
+		return x.Digest
+	}
+	return nil
+}
+
+func (x *AESubtreeRequest) GetPath() []uint32 {
+	if x != nil {
+		return x.Path
+	}
+	return nil
+}
+
+type AESubtreeResponse struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ChildHashes         []uint64               `protobuf:"varint,1,rep,packed,name=child_hashes,json=childHashes,proto3" json:"child_hashes,omitempty"`
+	RingVersionMismatch bool                   `protobuf:"varint,2,opt,name=ring_version_mismatch,json=ringVersionMismatch,proto3" json:"ring_version_mismatch,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *AESubtreeResponse) Reset() {
+	*x = AESubtreeResponse{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AESubtreeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AESubtreeResponse) ProtoMessage() {}
+
+func (x *AESubtreeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AESubtreeResponse.ProtoReflect.Descriptor instead.
+func (*AESubtreeResponse) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *AESubtreeResponse) GetChildHashes() []uint64 {
+	if x != nil {
+		return x.ChildHashes
+	}
+	return nil
+}
+
+func (x *AESubtreeResponse) GetRingVersionMismatch() bool {
+	if x != nil {
+		return x.RingVersionMismatch
+	}
+	return false
+}
+
+type AELeafRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Digest        *AEKeyspaceDigest      `protobuf:"bytes,1,opt,name=digest,proto3" json:"digest,omitempty"`
+	BucketIndex   uint32                 `protobuf:"varint,2,opt,name=bucket_index,json=bucketIndex,proto3" json:"bucket_index,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AELeafRequest) Reset() {
+	*x = AELeafRequest{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AELeafRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AELeafRequest) ProtoMessage() {}
+
+func (x *AELeafRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AELeafRequest.ProtoReflect.Descriptor instead.
+func (*AELeafRequest) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *AELeafRequest) GetDigest() *AEKeyspaceDigest {
+	if x != nil {
+		return x.Digest
+	}
+	return nil
+}
+
+func (x *AELeafRequest) GetBucketIndex() uint32 {
+	if x != nil {
+		return x.BucketIndex
+	}
+	return 0
+}
+
+type AELeafEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           []byte                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Timestamp     *HLCTimestamp          `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Deleted       bool                   `protobuf:"varint,3,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AELeafEntry) Reset() {
+	*x = AELeafEntry{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AELeafEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AELeafEntry) ProtoMessage() {}
+
+func (x *AELeafEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AELeafEntry.ProtoReflect.Descriptor instead.
+func (*AELeafEntry) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *AELeafEntry) GetKey() []byte {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *AELeafEntry) GetTimestamp() *HLCTimestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+func (x *AELeafEntry) GetDeleted() bool {
+	if x != nil {
+		return x.Deleted
+	}
+	return false
+}
+
+type TriggerAERequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"` // empty = all owned peers
+	Blocking      bool                   `protobuf:"varint,2,opt,name=blocking,proto3" json:"blocking,omitempty"`          // true = wait for completion, return stats
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TriggerAERequest) Reset() {
+	*x = TriggerAERequest{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TriggerAERequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TriggerAERequest) ProtoMessage() {}
+
+func (x *TriggerAERequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TriggerAERequest.ProtoReflect.Descriptor instead.
+func (*TriggerAERequest) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *TriggerAERequest) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *TriggerAERequest) GetBlocking() bool {
+	if x != nil {
+		return x.Blocking
+	}
+	return false
+}
+
+type TriggerAEResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Stats         []*AEReconcileStats    `protobuf:"bytes,1,rep,name=stats,proto3" json:"stats,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TriggerAEResponse) Reset() {
+	*x = TriggerAEResponse{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TriggerAEResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TriggerAEResponse) ProtoMessage() {}
+
+func (x *TriggerAEResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TriggerAEResponse.ProtoReflect.Descriptor instead.
+func (*TriggerAEResponse) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *TriggerAEResponse) GetStats() []*AEReconcileStats {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
+type AEReconcileStats struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	PeerId          string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	KeysScanned     uint64                 `protobuf:"varint,2,opt,name=keys_scanned,json=keysScanned,proto3" json:"keys_scanned,omitempty"`
+	DivergentLeaves uint64                 `protobuf:"varint,3,opt,name=divergent_leaves,json=divergentLeaves,proto3" json:"divergent_leaves,omitempty"`
+	KeysRepaired    uint64                 `protobuf:"varint,4,opt,name=keys_repaired,json=keysRepaired,proto3" json:"keys_repaired,omitempty"`
+	DurationMs      int64                  `protobuf:"varint,5,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	Error           string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AEReconcileStats) Reset() {
+	*x = AEReconcileStats{}
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AEReconcileStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AEReconcileStats) ProtoMessage() {}
+
+func (x *AEReconcileStats) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AEReconcileStats.ProtoReflect.Descriptor instead.
+func (*AEReconcileStats) Descriptor() ([]byte, []int) {
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *AEReconcileStats) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *AEReconcileStats) GetKeysScanned() uint64 {
+	if x != nil {
+		return x.KeysScanned
+	}
+	return 0
+}
+
+func (x *AEReconcileStats) GetDivergentLeaves() uint64 {
+	if x != nil {
+		return x.DivergentLeaves
+	}
+	return 0
+}
+
+func (x *AEReconcileStats) GetKeysRepaired() uint64 {
+	if x != nil {
+		return x.KeysRepaired
+	}
+	return 0
+}
+
+func (x *AEReconcileStats) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *AEReconcileStats) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 type GetNodeInfoRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -2293,7 +2885,7 @@ type GetNodeInfoRequest struct {
 
 func (x *GetNodeInfoRequest) Reset() {
 	*x = GetNodeInfoRequest{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[42]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2305,7 +2897,7 @@ func (x *GetNodeInfoRequest) String() string {
 func (*GetNodeInfoRequest) ProtoMessage() {}
 
 func (x *GetNodeInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[42]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2318,7 +2910,7 @@ func (x *GetNodeInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetNodeInfoRequest) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{42}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{52}
 }
 
 type GetNodeInfoResponse struct {
@@ -2333,7 +2925,7 @@ type GetNodeInfoResponse struct {
 
 func (x *GetNodeInfoResponse) Reset() {
 	*x = GetNodeInfoResponse{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[43]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2345,7 +2937,7 @@ func (x *GetNodeInfoResponse) String() string {
 func (*GetNodeInfoResponse) ProtoMessage() {}
 
 func (x *GetNodeInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[43]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2358,7 +2950,7 @@ func (x *GetNodeInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetNodeInfoResponse) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{43}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *GetNodeInfoResponse) GetNodeId() string {
@@ -2397,7 +2989,7 @@ type GetClusterStatusRequest struct {
 
 func (x *GetClusterStatusRequest) Reset() {
 	*x = GetClusterStatusRequest{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[44]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2409,7 +3001,7 @@ func (x *GetClusterStatusRequest) String() string {
 func (*GetClusterStatusRequest) ProtoMessage() {}
 
 func (x *GetClusterStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[44]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2422,7 +3014,7 @@ func (x *GetClusterStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetClusterStatusRequest) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{44}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{54}
 }
 
 type GetClusterStatusResponse struct {
@@ -2435,7 +3027,7 @@ type GetClusterStatusResponse struct {
 
 func (x *GetClusterStatusResponse) Reset() {
 	*x = GetClusterStatusResponse{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[45]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2447,7 +3039,7 @@ func (x *GetClusterStatusResponse) String() string {
 func (*GetClusterStatusResponse) ProtoMessage() {}
 
 func (x *GetClusterStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[45]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2460,7 +3052,7 @@ func (x *GetClusterStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetClusterStatusResponse) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{45}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *GetClusterStatusResponse) GetMembers() []*MemberUpdateProto {
@@ -2488,7 +3080,7 @@ type JoinRingRequest struct {
 
 func (x *JoinRingRequest) Reset() {
 	*x = JoinRingRequest{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[46]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2500,7 +3092,7 @@ func (x *JoinRingRequest) String() string {
 func (*JoinRingRequest) ProtoMessage() {}
 
 func (x *JoinRingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[46]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2513,7 +3105,7 @@ func (x *JoinRingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRingRequest.ProtoReflect.Descriptor instead.
 func (*JoinRingRequest) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{46}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *JoinRingRequest) GetAddr() string {
@@ -2546,7 +3138,7 @@ type JoinRingResponse struct {
 
 func (x *JoinRingResponse) Reset() {
 	*x = JoinRingResponse{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[47]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2558,7 +3150,7 @@ func (x *JoinRingResponse) String() string {
 func (*JoinRingResponse) ProtoMessage() {}
 
 func (x *JoinRingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[47]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2571,7 +3163,7 @@ func (x *JoinRingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRingResponse.ProtoReflect.Descriptor instead.
 func (*JoinRingResponse) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{47}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *JoinRingResponse) GetNodeId() string {
@@ -2591,7 +3183,7 @@ type ActivateNodeRequest struct {
 
 func (x *ActivateNodeRequest) Reset() {
 	*x = ActivateNodeRequest{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[48]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2603,7 +3195,7 @@ func (x *ActivateNodeRequest) String() string {
 func (*ActivateNodeRequest) ProtoMessage() {}
 
 func (x *ActivateNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[48]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2616,7 +3208,7 @@ func (x *ActivateNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateNodeRequest.ProtoReflect.Descriptor instead.
 func (*ActivateNodeRequest) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{48}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *ActivateNodeRequest) GetNodeId() string {
@@ -2641,7 +3233,7 @@ type ActivateNodeResponse struct {
 
 func (x *ActivateNodeResponse) Reset() {
 	*x = ActivateNodeResponse{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[49]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2653,7 +3245,7 @@ func (x *ActivateNodeResponse) String() string {
 func (*ActivateNodeResponse) ProtoMessage() {}
 
 func (x *ActivateNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[49]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2666,7 +3258,7 @@ func (x *ActivateNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateNodeResponse.ProtoReflect.Descriptor instead.
 func (*ActivateNodeResponse) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{49}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{59}
 }
 
 type RemoveNodeRequest struct {
@@ -2679,7 +3271,7 @@ type RemoveNodeRequest struct {
 
 func (x *RemoveNodeRequest) Reset() {
 	*x = RemoveNodeRequest{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[50]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2691,7 +3283,7 @@ func (x *RemoveNodeRequest) String() string {
 func (*RemoveNodeRequest) ProtoMessage() {}
 
 func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[50]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2704,7 +3296,7 @@ func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeRequest.ProtoReflect.Descriptor instead.
 func (*RemoveNodeRequest) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{50}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *RemoveNodeRequest) GetNodeId() string {
@@ -2729,7 +3321,7 @@ type RemoveNodeResponse struct {
 
 func (x *RemoveNodeResponse) Reset() {
 	*x = RemoveNodeResponse{}
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[51]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2741,7 +3333,7 @@ func (x *RemoveNodeResponse) String() string {
 func (*RemoveNodeResponse) ProtoMessage() {}
 
 func (x *RemoveNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_theseonpb_theseon_proto_msgTypes[51]
+	mi := &file_proto_theseonpb_theseon_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2754,7 +3346,7 @@ func (x *RemoveNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeResponse.ProtoReflect.Descriptor instead.
 func (*RemoveNodeResponse) Descriptor() ([]byte, []int) {
-	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{51}
+	return file_proto_theseonpb_theseon_proto_rawDescGZIP(), []int{61}
 }
 
 var File_proto_theseonpb_theseon_proto protoreflect.FileDescriptor
@@ -2929,7 +3521,46 @@ const file_proto_theseonpb_theseon_proto_rawDesc = "" +
 	"\tef_search\x18\x04 \x01(\x05R\befSearch\x12#\n" +
 	"\rconfig_digest\x18\x05 \x01(\x04R\fconfigDigest\"X\n" +
 	"\x1dReplicateVectorSearchResponse\x127\n" +
-	"\aresults\x18\x01 \x03(\v2\x1d.theseonpb.VectorSearchResultR\aresults\"\x14\n" +
+	"\aresults\x18\x01 \x03(\v2\x1d.theseonpb.VectorSearchResultR\aresults\"\xfe\x01\n" +
+	"\x10AEKeyspaceDigest\x12!\n" +
+	"\fring_version\x18\x01 \x01(\x04R\vringVersion\x12!\n" +
+	"\finitiator_id\x18\x02 \x01(\tR\vinitiatorId\x12\x1b\n" +
+	"\ttarget_id\x18\x03 \x01(\tR\btargetId\x12\x14\n" +
+	"\x05depth\x18\x04 \x01(\rR\x05depth\x12\x16\n" +
+	"\x06fanout\x18\x05 \x01(\rR\x06fanout\x12*\n" +
+	"\x11grace_cutoff_wall\x18\x06 \x01(\x03R\x0fgraceCutoffWall\x12-\n" +
+	"\x12replication_factor\x18\a \x01(\x05R\x11replicationFactor\"D\n" +
+	"\rAERootRequest\x123\n" +
+	"\x06digest\x18\x01 \x01(\v2\x1b.theseonpb.AEKeyspaceDigestR\x06digest\"a\n" +
+	"\x0eAERootResponse\x12\x1b\n" +
+	"\troot_hash\x18\x01 \x01(\x04R\brootHash\x122\n" +
+	"\x15ring_version_mismatch\x18\x02 \x01(\bR\x13ringVersionMismatch\"[\n" +
+	"\x10AESubtreeRequest\x123\n" +
+	"\x06digest\x18\x01 \x01(\v2\x1b.theseonpb.AEKeyspaceDigestR\x06digest\x12\x12\n" +
+	"\x04path\x18\x02 \x03(\rR\x04path\"j\n" +
+	"\x11AESubtreeResponse\x12!\n" +
+	"\fchild_hashes\x18\x01 \x03(\x04R\vchildHashes\x122\n" +
+	"\x15ring_version_mismatch\x18\x02 \x01(\bR\x13ringVersionMismatch\"g\n" +
+	"\rAELeafRequest\x123\n" +
+	"\x06digest\x18\x01 \x01(\v2\x1b.theseonpb.AEKeyspaceDigestR\x06digest\x12!\n" +
+	"\fbucket_index\x18\x02 \x01(\rR\vbucketIndex\"p\n" +
+	"\vAELeafEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\fR\x03key\x125\n" +
+	"\ttimestamp\x18\x02 \x01(\v2\x17.theseonpb.HLCTimestampR\ttimestamp\x12\x18\n" +
+	"\adeleted\x18\x03 \x01(\bR\adeleted\"G\n" +
+	"\x10TriggerAERequest\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1a\n" +
+	"\bblocking\x18\x02 \x01(\bR\bblocking\"F\n" +
+	"\x11TriggerAEResponse\x121\n" +
+	"\x05stats\x18\x01 \x03(\v2\x1b.theseonpb.AEReconcileStatsR\x05stats\"\xd5\x01\n" +
+	"\x10AEReconcileStats\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12!\n" +
+	"\fkeys_scanned\x18\x02 \x01(\x04R\vkeysScanned\x12)\n" +
+	"\x10divergent_leaves\x18\x03 \x01(\x04R\x0fdivergentLeaves\x12#\n" +
+	"\rkeys_repaired\x18\x04 \x01(\x04R\fkeysRepaired\x12\x1f\n" +
+	"\vduration_ms\x18\x05 \x01(\x03R\n" +
+	"durationMs\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"\x14\n" +
 	"\x12GetNodeInfoRequest\"}\n" +
 	"\x13GetNodeInfoResponse\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
@@ -2965,7 +3596,7 @@ const file_proto_theseonpb_theseon_proto_rawDesc = "" +
 	"\x10CreateCollection\x12\".theseonpb.CreateCollectionRequest\x1a#.theseonpb.CreateCollectionResponse\x12F\n" +
 	"\tVectorPut\x12\x1b.theseonpb.VectorPutRequest\x1a\x1c.theseonpb.VectorPutResponse\x12O\n" +
 	"\fVectorDelete\x12\x1e.theseonpb.VectorDeleteRequest\x1a\x1f.theseonpb.VectorDeleteResponse\x12O\n" +
-	"\fVectorSearch\x12\x1e.theseonpb.VectorSearchRequest\x1a\x1f.theseonpb.VectorSearchResponse2\xa9\x06\n" +
+	"\fVectorSearch\x12\x1e.theseonpb.VectorSearchRequest\x1a\x1f.theseonpb.VectorSearchResponse2\xff\a\n" +
 	"\x0fInternalService\x127\n" +
 	"\x04Ping\x12\x16.theseonpb.PingRequest\x1a\x17.theseonpb.PingResponse\x12@\n" +
 	"\aPingReq\x12\x19.theseonpb.PingReqRequest\x1a\x1a.theseonpb.PingReqResponse\x12I\n" +
@@ -2976,14 +3607,18 @@ const file_proto_theseonpb_theseon_proto_rawDesc = "" +
 	"\rReplicateRead\x12\x1f.theseonpb.ReplicateReadRequest\x1a .theseonpb.ReplicateReadResponse\x12g\n" +
 	"\x14ReplicateVectorWrite\x12&.theseonpb.ReplicateVectorWriteRequest\x1a'.theseonpb.ReplicateVectorWriteResponse\x12j\n" +
 	"\x15ReplicateVectorDelete\x12'.theseonpb.ReplicateVectorDeleteRequest\x1a(.theseonpb.ReplicateVectorDeleteResponse\x12j\n" +
-	"\x15ReplicateVectorSearch\x12'.theseonpb.ReplicateVectorSearchRequest\x1a(.theseonpb.ReplicateVectorSearchResponse2\x9a\x03\n" +
+	"\x15ReplicateVectorSearch\x12'.theseonpb.ReplicateVectorSearchRequest\x1a(.theseonpb.ReplicateVectorSearchResponse\x12D\n" +
+	"\rComputeAERoot\x12\x18.theseonpb.AERootRequest\x1a\x19.theseonpb.AERootResponse\x12I\n" +
+	"\fGetAESubtree\x12\x1b.theseonpb.AESubtreeRequest\x1a\x1c.theseonpb.AESubtreeResponse\x12C\n" +
+	"\rGetAELeafKeys\x12\x18.theseonpb.AELeafRequest\x1a\x16.theseonpb.AELeafEntry0\x012\xeb\x03\n" +
 	"\fAdminService\x12L\n" +
 	"\vGetNodeInfo\x12\x1d.theseonpb.GetNodeInfoRequest\x1a\x1e.theseonpb.GetNodeInfoResponse\x12[\n" +
 	"\x10GetClusterStatus\x12\".theseonpb.GetClusterStatusRequest\x1a#.theseonpb.GetClusterStatusResponse\x12C\n" +
 	"\bJoinRing\x12\x1a.theseonpb.JoinRingRequest\x1a\x1b.theseonpb.JoinRingResponse\x12O\n" +
 	"\fActivateNode\x12\x1e.theseonpb.ActivateNodeRequest\x1a\x1f.theseonpb.ActivateNodeResponse\x12I\n" +
 	"\n" +
-	"RemoveNode\x12\x1c.theseonpb.RemoveNodeRequest\x1a\x1d.theseonpb.RemoveNodeResponseB,Z*github.com/ulixert/theseon/proto/theseonpbb\x06proto3"
+	"RemoveNode\x12\x1c.theseonpb.RemoveNodeRequest\x1a\x1d.theseonpb.RemoveNodeResponse\x12O\n" +
+	"\x12TriggerAntiEntropy\x12\x1b.theseonpb.TriggerAERequest\x1a\x1c.theseonpb.TriggerAEResponseB,Z*github.com/ulixert/theseon/proto/theseonpbb\x06proto3"
 
 var (
 	file_proto_theseonpb_theseon_proto_rawDescOnce sync.Once
@@ -2997,7 +3632,7 @@ func file_proto_theseonpb_theseon_proto_rawDescGZIP() []byte {
 	return file_proto_theseonpb_theseon_proto_rawDescData
 }
 
-var file_proto_theseonpb_theseon_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
+var file_proto_theseonpb_theseon_proto_msgTypes = make([]protoimpl.MessageInfo, 65)
 var file_proto_theseonpb_theseon_proto_goTypes = []any{
 	(*PutRequest)(nil),                    // 0: theseonpb.PutRequest
 	(*PutResponse)(nil),                   // 1: theseonpb.PutResponse
@@ -3041,19 +3676,29 @@ var file_proto_theseonpb_theseon_proto_goTypes = []any{
 	(*ReplicateVectorDeleteResponse)(nil), // 39: theseonpb.ReplicateVectorDeleteResponse
 	(*ReplicateVectorSearchRequest)(nil),  // 40: theseonpb.ReplicateVectorSearchRequest
 	(*ReplicateVectorSearchResponse)(nil), // 41: theseonpb.ReplicateVectorSearchResponse
-	(*GetNodeInfoRequest)(nil),            // 42: theseonpb.GetNodeInfoRequest
-	(*GetNodeInfoResponse)(nil),           // 43: theseonpb.GetNodeInfoResponse
-	(*GetClusterStatusRequest)(nil),       // 44: theseonpb.GetClusterStatusRequest
-	(*GetClusterStatusResponse)(nil),      // 45: theseonpb.GetClusterStatusResponse
-	(*JoinRingRequest)(nil),               // 46: theseonpb.JoinRingRequest
-	(*JoinRingResponse)(nil),              // 47: theseonpb.JoinRingResponse
-	(*ActivateNodeRequest)(nil),           // 48: theseonpb.ActivateNodeRequest
-	(*ActivateNodeResponse)(nil),          // 49: theseonpb.ActivateNodeResponse
-	(*RemoveNodeRequest)(nil),             // 50: theseonpb.RemoveNodeRequest
-	(*RemoveNodeResponse)(nil),            // 51: theseonpb.RemoveNodeResponse
-	nil,                                   // 52: theseonpb.VectorPutRequest.MetadataEntry
-	nil,                                   // 53: theseonpb.VectorSearchResult.MetadataEntry
-	nil,                                   // 54: theseonpb.ReplicateVectorWriteRequest.MetadataEntry
+	(*AEKeyspaceDigest)(nil),              // 42: theseonpb.AEKeyspaceDigest
+	(*AERootRequest)(nil),                 // 43: theseonpb.AERootRequest
+	(*AERootResponse)(nil),                // 44: theseonpb.AERootResponse
+	(*AESubtreeRequest)(nil),              // 45: theseonpb.AESubtreeRequest
+	(*AESubtreeResponse)(nil),             // 46: theseonpb.AESubtreeResponse
+	(*AELeafRequest)(nil),                 // 47: theseonpb.AELeafRequest
+	(*AELeafEntry)(nil),                   // 48: theseonpb.AELeafEntry
+	(*TriggerAERequest)(nil),              // 49: theseonpb.TriggerAERequest
+	(*TriggerAEResponse)(nil),             // 50: theseonpb.TriggerAEResponse
+	(*AEReconcileStats)(nil),              // 51: theseonpb.AEReconcileStats
+	(*GetNodeInfoRequest)(nil),            // 52: theseonpb.GetNodeInfoRequest
+	(*GetNodeInfoResponse)(nil),           // 53: theseonpb.GetNodeInfoResponse
+	(*GetClusterStatusRequest)(nil),       // 54: theseonpb.GetClusterStatusRequest
+	(*GetClusterStatusResponse)(nil),      // 55: theseonpb.GetClusterStatusResponse
+	(*JoinRingRequest)(nil),               // 56: theseonpb.JoinRingRequest
+	(*JoinRingResponse)(nil),              // 57: theseonpb.JoinRingResponse
+	(*ActivateNodeRequest)(nil),           // 58: theseonpb.ActivateNodeRequest
+	(*ActivateNodeResponse)(nil),          // 59: theseonpb.ActivateNodeResponse
+	(*RemoveNodeRequest)(nil),             // 60: theseonpb.RemoveNodeRequest
+	(*RemoveNodeResponse)(nil),            // 61: theseonpb.RemoveNodeResponse
+	nil,                                   // 62: theseonpb.VectorPutRequest.MetadataEntry
+	nil,                                   // 63: theseonpb.VectorSearchResult.MetadataEntry
+	nil,                                   // 64: theseonpb.ReplicateVectorWriteRequest.MetadataEntry
 }
 var file_proto_theseonpb_theseon_proto_depIdxs = []int32{
 	9,  // 0: theseonpb.BatchWriteRequest.entries:type_name -> theseonpb.BatchEntry
@@ -3069,66 +3714,79 @@ var file_proto_theseonpb_theseon_proto_depIdxs = []int32{
 	20, // 10: theseonpb.ReplicateWriteRequest.timestamp:type_name -> theseonpb.HLCTimestamp
 	21, // 11: theseonpb.ReplicateWriteBatchRequest.entries:type_name -> theseonpb.ReplicateWriteRequest
 	20, // 12: theseonpb.ReplicateReadResponse.timestamp:type_name -> theseonpb.HLCTimestamp
-	52, // 13: theseonpb.VectorPutRequest.metadata:type_name -> theseonpb.VectorPutRequest.MetadataEntry
+	62, // 13: theseonpb.VectorPutRequest.metadata:type_name -> theseonpb.VectorPutRequest.MetadataEntry
 	35, // 14: theseonpb.VectorSearchResponse.results:type_name -> theseonpb.VectorSearchResult
-	53, // 15: theseonpb.VectorSearchResult.metadata:type_name -> theseonpb.VectorSearchResult.MetadataEntry
-	54, // 16: theseonpb.ReplicateVectorWriteRequest.metadata:type_name -> theseonpb.ReplicateVectorWriteRequest.MetadataEntry
+	63, // 15: theseonpb.VectorSearchResult.metadata:type_name -> theseonpb.VectorSearchResult.MetadataEntry
+	64, // 16: theseonpb.ReplicateVectorWriteRequest.metadata:type_name -> theseonpb.ReplicateVectorWriteRequest.MetadataEntry
 	20, // 17: theseonpb.ReplicateVectorWriteRequest.timestamp:type_name -> theseonpb.HLCTimestamp
 	20, // 18: theseonpb.ReplicateVectorDeleteRequest.timestamp:type_name -> theseonpb.HLCTimestamp
 	35, // 19: theseonpb.ReplicateVectorSearchResponse.results:type_name -> theseonpb.VectorSearchResult
-	17, // 20: theseonpb.GetClusterStatusResponse.members:type_name -> theseonpb.MemberUpdateProto
-	18, // 21: theseonpb.GetClusterStatusResponse.ring_descriptor:type_name -> theseonpb.RingDescriptorProto
-	0,  // 22: theseonpb.Theseon.Put:input_type -> theseonpb.PutRequest
-	2,  // 23: theseonpb.Theseon.Get:input_type -> theseonpb.GetRequest
-	4,  // 24: theseonpb.Theseon.Delete:input_type -> theseonpb.DeleteRequest
-	6,  // 25: theseonpb.Theseon.Scan:input_type -> theseonpb.ScanRequest
-	8,  // 26: theseonpb.Theseon.BatchWrite:input_type -> theseonpb.BatchWriteRequest
-	27, // 27: theseonpb.Theseon.CreateCollection:input_type -> theseonpb.CreateCollectionRequest
-	29, // 28: theseonpb.Theseon.VectorPut:input_type -> theseonpb.VectorPutRequest
-	31, // 29: theseonpb.Theseon.VectorDelete:input_type -> theseonpb.VectorDeleteRequest
-	33, // 30: theseonpb.Theseon.VectorSearch:input_type -> theseonpb.VectorSearchRequest
-	11, // 31: theseonpb.InternalService.Ping:input_type -> theseonpb.PingRequest
-	13, // 32: theseonpb.InternalService.PingReq:input_type -> theseonpb.PingReqRequest
-	15, // 33: theseonpb.InternalService.GossipSync:input_type -> theseonpb.GossipSyncRequest
-	21, // 34: theseonpb.InternalService.ReplicateWrite:input_type -> theseonpb.ReplicateWriteRequest
-	23, // 35: theseonpb.InternalService.ReplicateWriteBatch:input_type -> theseonpb.ReplicateWriteBatchRequest
-	25, // 36: theseonpb.InternalService.ReplicateRead:input_type -> theseonpb.ReplicateReadRequest
-	36, // 37: theseonpb.InternalService.ReplicateVectorWrite:input_type -> theseonpb.ReplicateVectorWriteRequest
-	38, // 38: theseonpb.InternalService.ReplicateVectorDelete:input_type -> theseonpb.ReplicateVectorDeleteRequest
-	40, // 39: theseonpb.InternalService.ReplicateVectorSearch:input_type -> theseonpb.ReplicateVectorSearchRequest
-	42, // 40: theseonpb.AdminService.GetNodeInfo:input_type -> theseonpb.GetNodeInfoRequest
-	44, // 41: theseonpb.AdminService.GetClusterStatus:input_type -> theseonpb.GetClusterStatusRequest
-	46, // 42: theseonpb.AdminService.JoinRing:input_type -> theseonpb.JoinRingRequest
-	48, // 43: theseonpb.AdminService.ActivateNode:input_type -> theseonpb.ActivateNodeRequest
-	50, // 44: theseonpb.AdminService.RemoveNode:input_type -> theseonpb.RemoveNodeRequest
-	1,  // 45: theseonpb.Theseon.Put:output_type -> theseonpb.PutResponse
-	3,  // 46: theseonpb.Theseon.Get:output_type -> theseonpb.GetResponse
-	5,  // 47: theseonpb.Theseon.Delete:output_type -> theseonpb.DeleteResponse
-	7,  // 48: theseonpb.Theseon.Scan:output_type -> theseonpb.ScanResponse
-	10, // 49: theseonpb.Theseon.BatchWrite:output_type -> theseonpb.BatchWriteResponse
-	28, // 50: theseonpb.Theseon.CreateCollection:output_type -> theseonpb.CreateCollectionResponse
-	30, // 51: theseonpb.Theseon.VectorPut:output_type -> theseonpb.VectorPutResponse
-	32, // 52: theseonpb.Theseon.VectorDelete:output_type -> theseonpb.VectorDeleteResponse
-	34, // 53: theseonpb.Theseon.VectorSearch:output_type -> theseonpb.VectorSearchResponse
-	12, // 54: theseonpb.InternalService.Ping:output_type -> theseonpb.PingResponse
-	14, // 55: theseonpb.InternalService.PingReq:output_type -> theseonpb.PingReqResponse
-	16, // 56: theseonpb.InternalService.GossipSync:output_type -> theseonpb.GossipSyncResponse
-	22, // 57: theseonpb.InternalService.ReplicateWrite:output_type -> theseonpb.ReplicateWriteResponse
-	24, // 58: theseonpb.InternalService.ReplicateWriteBatch:output_type -> theseonpb.ReplicateWriteBatchResponse
-	26, // 59: theseonpb.InternalService.ReplicateRead:output_type -> theseonpb.ReplicateReadResponse
-	37, // 60: theseonpb.InternalService.ReplicateVectorWrite:output_type -> theseonpb.ReplicateVectorWriteResponse
-	39, // 61: theseonpb.InternalService.ReplicateVectorDelete:output_type -> theseonpb.ReplicateVectorDeleteResponse
-	41, // 62: theseonpb.InternalService.ReplicateVectorSearch:output_type -> theseonpb.ReplicateVectorSearchResponse
-	43, // 63: theseonpb.AdminService.GetNodeInfo:output_type -> theseonpb.GetNodeInfoResponse
-	45, // 64: theseonpb.AdminService.GetClusterStatus:output_type -> theseonpb.GetClusterStatusResponse
-	47, // 65: theseonpb.AdminService.JoinRing:output_type -> theseonpb.JoinRingResponse
-	49, // 66: theseonpb.AdminService.ActivateNode:output_type -> theseonpb.ActivateNodeResponse
-	51, // 67: theseonpb.AdminService.RemoveNode:output_type -> theseonpb.RemoveNodeResponse
-	45, // [45:68] is the sub-list for method output_type
-	22, // [22:45] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	42, // 20: theseonpb.AERootRequest.digest:type_name -> theseonpb.AEKeyspaceDigest
+	42, // 21: theseonpb.AESubtreeRequest.digest:type_name -> theseonpb.AEKeyspaceDigest
+	42, // 22: theseonpb.AELeafRequest.digest:type_name -> theseonpb.AEKeyspaceDigest
+	20, // 23: theseonpb.AELeafEntry.timestamp:type_name -> theseonpb.HLCTimestamp
+	51, // 24: theseonpb.TriggerAEResponse.stats:type_name -> theseonpb.AEReconcileStats
+	17, // 25: theseonpb.GetClusterStatusResponse.members:type_name -> theseonpb.MemberUpdateProto
+	18, // 26: theseonpb.GetClusterStatusResponse.ring_descriptor:type_name -> theseonpb.RingDescriptorProto
+	0,  // 27: theseonpb.Theseon.Put:input_type -> theseonpb.PutRequest
+	2,  // 28: theseonpb.Theseon.Get:input_type -> theseonpb.GetRequest
+	4,  // 29: theseonpb.Theseon.Delete:input_type -> theseonpb.DeleteRequest
+	6,  // 30: theseonpb.Theseon.Scan:input_type -> theseonpb.ScanRequest
+	8,  // 31: theseonpb.Theseon.BatchWrite:input_type -> theseonpb.BatchWriteRequest
+	27, // 32: theseonpb.Theseon.CreateCollection:input_type -> theseonpb.CreateCollectionRequest
+	29, // 33: theseonpb.Theseon.VectorPut:input_type -> theseonpb.VectorPutRequest
+	31, // 34: theseonpb.Theseon.VectorDelete:input_type -> theseonpb.VectorDeleteRequest
+	33, // 35: theseonpb.Theseon.VectorSearch:input_type -> theseonpb.VectorSearchRequest
+	11, // 36: theseonpb.InternalService.Ping:input_type -> theseonpb.PingRequest
+	13, // 37: theseonpb.InternalService.PingReq:input_type -> theseonpb.PingReqRequest
+	15, // 38: theseonpb.InternalService.GossipSync:input_type -> theseonpb.GossipSyncRequest
+	21, // 39: theseonpb.InternalService.ReplicateWrite:input_type -> theseonpb.ReplicateWriteRequest
+	23, // 40: theseonpb.InternalService.ReplicateWriteBatch:input_type -> theseonpb.ReplicateWriteBatchRequest
+	25, // 41: theseonpb.InternalService.ReplicateRead:input_type -> theseonpb.ReplicateReadRequest
+	36, // 42: theseonpb.InternalService.ReplicateVectorWrite:input_type -> theseonpb.ReplicateVectorWriteRequest
+	38, // 43: theseonpb.InternalService.ReplicateVectorDelete:input_type -> theseonpb.ReplicateVectorDeleteRequest
+	40, // 44: theseonpb.InternalService.ReplicateVectorSearch:input_type -> theseonpb.ReplicateVectorSearchRequest
+	43, // 45: theseonpb.InternalService.ComputeAERoot:input_type -> theseonpb.AERootRequest
+	45, // 46: theseonpb.InternalService.GetAESubtree:input_type -> theseonpb.AESubtreeRequest
+	47, // 47: theseonpb.InternalService.GetAELeafKeys:input_type -> theseonpb.AELeafRequest
+	52, // 48: theseonpb.AdminService.GetNodeInfo:input_type -> theseonpb.GetNodeInfoRequest
+	54, // 49: theseonpb.AdminService.GetClusterStatus:input_type -> theseonpb.GetClusterStatusRequest
+	56, // 50: theseonpb.AdminService.JoinRing:input_type -> theseonpb.JoinRingRequest
+	58, // 51: theseonpb.AdminService.ActivateNode:input_type -> theseonpb.ActivateNodeRequest
+	60, // 52: theseonpb.AdminService.RemoveNode:input_type -> theseonpb.RemoveNodeRequest
+	49, // 53: theseonpb.AdminService.TriggerAntiEntropy:input_type -> theseonpb.TriggerAERequest
+	1,  // 54: theseonpb.Theseon.Put:output_type -> theseonpb.PutResponse
+	3,  // 55: theseonpb.Theseon.Get:output_type -> theseonpb.GetResponse
+	5,  // 56: theseonpb.Theseon.Delete:output_type -> theseonpb.DeleteResponse
+	7,  // 57: theseonpb.Theseon.Scan:output_type -> theseonpb.ScanResponse
+	10, // 58: theseonpb.Theseon.BatchWrite:output_type -> theseonpb.BatchWriteResponse
+	28, // 59: theseonpb.Theseon.CreateCollection:output_type -> theseonpb.CreateCollectionResponse
+	30, // 60: theseonpb.Theseon.VectorPut:output_type -> theseonpb.VectorPutResponse
+	32, // 61: theseonpb.Theseon.VectorDelete:output_type -> theseonpb.VectorDeleteResponse
+	34, // 62: theseonpb.Theseon.VectorSearch:output_type -> theseonpb.VectorSearchResponse
+	12, // 63: theseonpb.InternalService.Ping:output_type -> theseonpb.PingResponse
+	14, // 64: theseonpb.InternalService.PingReq:output_type -> theseonpb.PingReqResponse
+	16, // 65: theseonpb.InternalService.GossipSync:output_type -> theseonpb.GossipSyncResponse
+	22, // 66: theseonpb.InternalService.ReplicateWrite:output_type -> theseonpb.ReplicateWriteResponse
+	24, // 67: theseonpb.InternalService.ReplicateWriteBatch:output_type -> theseonpb.ReplicateWriteBatchResponse
+	26, // 68: theseonpb.InternalService.ReplicateRead:output_type -> theseonpb.ReplicateReadResponse
+	37, // 69: theseonpb.InternalService.ReplicateVectorWrite:output_type -> theseonpb.ReplicateVectorWriteResponse
+	39, // 70: theseonpb.InternalService.ReplicateVectorDelete:output_type -> theseonpb.ReplicateVectorDeleteResponse
+	41, // 71: theseonpb.InternalService.ReplicateVectorSearch:output_type -> theseonpb.ReplicateVectorSearchResponse
+	44, // 72: theseonpb.InternalService.ComputeAERoot:output_type -> theseonpb.AERootResponse
+	46, // 73: theseonpb.InternalService.GetAESubtree:output_type -> theseonpb.AESubtreeResponse
+	48, // 74: theseonpb.InternalService.GetAELeafKeys:output_type -> theseonpb.AELeafEntry
+	53, // 75: theseonpb.AdminService.GetNodeInfo:output_type -> theseonpb.GetNodeInfoResponse
+	55, // 76: theseonpb.AdminService.GetClusterStatus:output_type -> theseonpb.GetClusterStatusResponse
+	57, // 77: theseonpb.AdminService.JoinRing:output_type -> theseonpb.JoinRingResponse
+	59, // 78: theseonpb.AdminService.ActivateNode:output_type -> theseonpb.ActivateNodeResponse
+	61, // 79: theseonpb.AdminService.RemoveNode:output_type -> theseonpb.RemoveNodeResponse
+	50, // 80: theseonpb.AdminService.TriggerAntiEntropy:output_type -> theseonpb.TriggerAEResponse
+	54, // [54:81] is the sub-list for method output_type
+	27, // [27:54] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_proto_theseonpb_theseon_proto_init() }
@@ -3142,7 +3800,7 @@ func file_proto_theseonpb_theseon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_theseonpb_theseon_proto_rawDesc), len(file_proto_theseonpb_theseon_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   55,
+			NumMessages:   65,
 			NumExtensions: 0,
 			NumServices:   3,
 		},
