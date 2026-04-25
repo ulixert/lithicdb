@@ -47,6 +47,17 @@ func (m *mockClient) ReplicateVectorSearch(_ context.Context, _ *pb.ReplicateVec
 	return nil, nil
 }
 
+// Anti-entropy stubs — coordinator tests don't exercise AE.
+func (m *mockClient) ComputeAERoot(context.Context, *pb.AERootRequest, ...grpc.CallOption) (*pb.AERootResponse, error) {
+	return nil, nil
+}
+func (m *mockClient) GetAESubtree(context.Context, *pb.AESubtreeRequest, ...grpc.CallOption) (*pb.AESubtreeResponse, error) {
+	return nil, nil
+}
+func (m *mockClient) GetAELeafKeys(context.Context, *pb.AELeafRequest, ...grpc.CallOption) (pb.InternalService_GetAELeafKeysClient, error) {
+	return nil, nil
+}
+
 func (m *mockClient) ReplicateWrite(ctx context.Context, req *pb.ReplicateWriteRequest, _ ...grpc.CallOption) (*pb.ReplicateWriteResponse, error) {
 	if m.writeFn != nil {
 		return m.writeFn(ctx, req)
