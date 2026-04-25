@@ -100,3 +100,49 @@ func (s *DBSource) Close() error {
 	s.iter = nil
 	return err
 }
+
+// BucketSource yields only entries belonging to a specific bucket of a
+// (fanout, depth) tree configuration co-owned by selfID and peerID.
+// Used by the leaf-listing RPC handler - it scans the local DB and
+// filters both by ring ownership and by bucket index.
+type BucketSource struct {
+	dbs    *DBSource
+	tree   *Tree
+	bucket int
+}
+
+// NewBucketSource creates a BucketSource for the given bucket index.
+// graceCutoffWall mirrors BuildTree's filter.
+func NewBucketSource(database *db.DB, ring *hashring.Ring, selfID, peerID string,
+	n, fanout, depth, bucket int,
+) (*BucketSource, error) {
+	t, err := NewTree(fanout, depth)
+	if err != nil {
+		return nil, err
+	}
+	if bucket < 0 || bucket >= t.NumLeaves() {
+		return nil, fmt.Errorf("anti entropy: bucket %d out of range [0,%d)", bucket, t.NumLeaves())
+	}
+	return &BucketSource{
+		dbs:    NewDBSource(database, ring, selfID, peerID, n),
+		tree:   t,
+		bucket: bucket,
+	}, nil
+}
+
+// Next yields the next entry in the target bucket.
+func (b *BucketSource) Next() (Entry, bool, error) {
+	for {
+		e, ok, err := b.dbs.Next()
+		if err != nil || !ok {
+			return e, ok, err
+		}
+		if b.tree.BucketFor(e.Key) != b.bucket {
+			continue
+		}
+		return e, true, nil
+	}
+}
+
+// Close releases the underlying DBSource.
+func (b *BucketSource) Close() error { return b.dbs.Close() }
