@@ -176,6 +176,70 @@ func (r *reconciler) Run(ctx context.Context) ReconcileStats {
 	return stats
 }
 
+// findDivergentBuckets walks the tree level-by-level via GetAESubtree
+// RPCs, descending only into mismatched subtrees. Returns the bucket
+// indices whose leaves differ.
+func (r *reconciler) findDivergentBuckets(
+	ctx context.Context,
+	client pb.InternalServiceClient,
+	localTree *Tree,
+	digest keyspaceDigest,
+) ([]int, error) {
+	type frame struct {
+		path []int
+	}
+	queue := []frame{{path: nil}}
+	var divergent []int
+
+	for len(queue) > 0 {
+		f := queue[0]
+		queue[0] = frame{}
+		queue = queue[1:]
+
+		// Local children on this path.
+		localChildren, err := localTree.ChildrenAt(f.path)
+		if err != nil {
+			return nil, fmt.Errorf("local children at %v: %w", f.path, err)
+		}
+
+		// Peer children at the same path.
+		req := &pb.AESubtreeRequest{
+			Digest: digest.toProto(),
+			Path:   uint32Path(f.path),
+		}
+		resp, err := client.GetAESubtree(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("GetAESubtree path=%v: %w", f.path, err)
+		}
+		if resp.RingVersionMismatch {
+			return nil, ErrRingVersionMismatch
+		}
+		if len(resp.ChildHashes) != len(localChildren) {
+			return nil, fmt.Errorf("peer returned %d children, expected %d",
+				len(resp.ChildHashes), len(localChildren))
+		}
+
+		nextLevel := len(f.path) + 1
+		for i, peerHash := range resp.ChildHashes {
+			if peerHash == localChildren[i] {
+				continue
+			}
+			childPath := append(append([]int(nil), f.path...), i)
+			if nextLevel == localTree.Depth() {
+				// Leaf level - record the bucket index.
+				bucketIdx := 0
+				for _, p := range childPath {
+					bucketIdx = bucketIdx*localTree.Fanout() + p
+				}
+				divergent = append(divergent, bucketIdx)
+			} else {
+				queue = append(queue, frame{path: childPath})
+			}
+		}
+	}
+	return divergent, nil
+}
+
 // keyspaceDigest is the Go-side mirror of pb.AEKeyspaceDigest. It
 // identifies both endpoints so each side can compute the "other" peer
 // from its own perspective and apply the symmetric ShouldReconcile
@@ -212,4 +276,12 @@ func (r *reconciler) digest() keyspaceDigest {
 		GraceCutoffWall:   time.Now().Add(-r.cfg.GracePeriod).UnixNano(),
 		ReplicationFactor: int32(r.replicationFactor),
 	}
+}
+
+func uint32Path(p []int) []uint32 {
+	out := make([]uint32, len(p))
+	for i, v := range p {
+		out[i] = uint32(v)
+	}
+	return out
 }
