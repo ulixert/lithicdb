@@ -76,6 +76,30 @@ var (
 		},
 		[]string{"rpc"},
 	)
+
+	// --- Anti-entropy ---
+
+	AEDivergentLeaves = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_divergent_leaves_total",
+			Help: "Total Merkle-tree leaves found divergent across all reconciles.",
+		},
+	)
+
+	AEKeysScanned = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_keys_scanned_total",
+			Help: "Keys scanned during anti-entropy tree builds.",
+		},
+	)
+
+	AEReconcileDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "theseon_ae_reconcile_duration_seconds",
+			Help:    "End-to-end duration of a single anti-entropy reconcile round.",
+			Buckets: prometheus.ExponentialBuckets(0.01, 2, 16), // 10ms ... ~5min
+		},
+	)
 )
 
 func init() {
@@ -88,6 +112,9 @@ func init() {
 		SSTableCount,
 		HintDrainBatches,
 		ClusterRPCDuration,
+		AEDivergentLeaves,
+		AEKeysScanned,
+		AEReconcileDuration,
 	)
 }
 
