@@ -86,6 +86,14 @@ var (
 		},
 	)
 
+	AEKeysRepaired = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_keys_repaired_total",
+			Help: "Keys repaired by anti-entropy, labeled by direction.",
+		},
+		[]string{"direction"}, // push | pull
+	)
+
 	AEKeysScanned = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "theseon_ae_keys_scanned_total",
@@ -113,6 +121,7 @@ func init() {
 		HintDrainBatches,
 		ClusterRPCDuration,
 		AEDivergentLeaves,
+		AEKeysRepaired,
 		AEKeysScanned,
 		AEReconcileDuration,
 	)
