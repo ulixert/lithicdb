@@ -510,6 +510,19 @@ type keyspaceDigest struct {
 	ReplicationFactor int32
 }
 
+// OtherFrom returns the endpoint ID that ISN'T selfID. If selfID
+// matches neither side, returns "" (caller should reject the request).
+func (d keyspaceDigest) OtherFrom(selfID string) string {
+	switch selfID {
+	case d.InitiatorID:
+		return d.TargetID
+	case d.TargetID:
+		return d.InitiatorID
+	default:
+		return ""
+	}
+}
+
 func (d keyspaceDigest) toProto() *pb.AEKeyspaceDigest {
 	return &pb.AEKeyspaceDigest{
 		RingVersion:       d.RingVersion,
@@ -519,6 +532,21 @@ func (d keyspaceDigest) toProto() *pb.AEKeyspaceDigest {
 		Fanout:            d.Fanout,
 		GraceCutoffWall:   d.GraceCutoffWall,
 		ReplicationFactor: d.ReplicationFactor,
+	}
+}
+
+func digestFromProto(p *pb.AEKeyspaceDigest) keyspaceDigest {
+	if p == nil {
+		return keyspaceDigest{}
+	}
+	return keyspaceDigest{
+		RingVersion:       p.RingVersion,
+		InitiatorID:       p.InitiatorId,
+		TargetID:          p.TargetId,
+		Depth:             p.Depth,
+		Fanout:            p.Fanout,
+		GraceCutoffWall:   p.GraceCutoffWall,
+		ReplicationFactor: p.ReplicationFactor,
 	}
 }
 
