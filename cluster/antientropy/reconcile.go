@@ -569,3 +569,11 @@ func uint32Path(p []int) []uint32 {
 	}
 	return out
 }
+
+func intPath(p []uint32) []int {
+	out := make([]int, len(p))
+	for i, v := range p {
+		out[i] = int(v)
+	}
+	return out
+}
