@@ -1,8 +1,10 @@
 package hnsw
 
 import (
+	"container/heap"
 	"math/rand/v2"
 	"sort"
+	"sync"
 	"testing"
 )
 
@@ -299,4 +301,180 @@ func randomVecBench(dim int) []float32 {
 		v[i] = rand.Float32()*2 - 1
 	}
 	return v
+}
+
+// TestSearch_AllocsBounded locks in the alloc-free contract on Search.
+// Pre-refactor this would report ~440+; post-refactor target is ≤8.
+// (Two pool Gets are recycled allocation-free; the residual allocs are the
+// SearchResult return slice in Search and the heapItem copy out of
+// searchLayer.)
+func TestSearch_AllocsBounded(t *testing.T) {
+	const (
+		n   = 200
+		dim = 32
+		k   = 10
+	)
+	g, err := New(DefaultOptions(dim))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range n {
+		if err := g.Insert(uint64(i), [16]byte{}, randomVec(dim)); err != nil {
+			t.Fatalf("Insert(%d): %v", i, err)
+		}
+	}
+	query := randomVec(dim)
+
+	// Warm up the pools so the steady-state alloc count is what we measure.
+	for range 100 {
+		_, _ = g.Search(query, k, nil)
+	}
+
+	allocs := testing.AllocsPerRun(200, func() {
+		_, _ = g.Search(query, k, nil)
+	})
+	const allowedAllocs = 8
+	if allocs > allowedAllocs {
+		t.Fatalf("Search allocs/op = %v, want <= %d", allocs, allowedAllocs)
+	}
+	t.Logf("Search allocs/op = %v", allocs)
+}
+
+// TestSearch_Concurrent exercises the per-call pool ownership: many goroutines
+// hammer Search on the same graph at once. With -race this catches any
+// accidentally shared mutable state across the visited / heap pools.
+func TestSearch_Concurrent(t *testing.T) {
+	const (
+		n           = 500
+		dim         = 32
+		k           = 10
+		goroutines  = 16
+		searchesPer = 50
+	)
+	g, err := New(DefaultOptions(dim))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range n {
+		if err := g.Insert(uint64(i), [16]byte{}, randomVec(dim)); err != nil {
+			t.Fatalf("Insert(%d): %v", i, err)
+		}
+	}
+
+	// Pre-build a stable set of queries so all goroutines see the same workload
+	// and pool-corruption bugs would manifest as differing result sets.
+	queries := make([][]float32, goroutines)
+	for i := range queries {
+		queries[i] = randomVec(dim)
+	}
+
+	// Serial baseline.
+	want := make([][]SearchResult, goroutines)
+	for i, q := range queries {
+		r, err := g.Search(q, k, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[i] = r
+	}
+
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for range searchesPer {
+				r, err := g.Search(queries[i], k, nil)
+				if err != nil {
+					t.Errorf("goroutine %d: %v", i, err)
+					return
+				}
+				if len(r) != len(want[i]) {
+					t.Errorf("goroutine %d: len mismatch %d != %d", i, len(r), len(want[i]))
+					return
+				}
+				for j, got := range r {
+					if got.ID != want[i][j].ID || got.Distance != want[i][j].Distance {
+						t.Errorf("goroutine %d pos %d: got %+v want %+v", i, j, got, want[i][j])
+						return
+					}
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// refHeap is a container/heap.Interface implementation used solely as the
+// reference oracle for TestDistHeap_Parity. Independent of the production
+// distHeap so the parity test is meaningful.
+type refHeap struct {
+	items []heapItem
+	max   bool
+}
+
+func (h refHeap) Len() int { return len(h.items) }
+func (h refHeap) Less(i, j int) bool {
+	if h.max {
+		return h.items[i].dist > h.items[j].dist
+	}
+	return h.items[i].dist < h.items[j].dist
+}
+func (h refHeap) Swap(i, j int) { h.items[i], h.items[j] = h.items[j], h.items[i] }
+func (h *refHeap) Push(x any)   { h.items = append(h.items, x.(heapItem)) }
+func (h *refHeap) Pop() any {
+	old := h.items
+	n := len(old)
+	item := old[n-1]
+	h.items = old[:n-1]
+	return item
+}
+
+// TestDistHeap_Parity drives the typed distHeap and a container/heap-backed
+// refHeap with the same random Push/Pop sequence and asserts identical pop
+// order. Catches sift-up / sift-down / max-vs-min bugs in the typed
+// implementation.
+func TestDistHeap_Parity(t *testing.T) {
+	for _, isMax := range []bool{false, true} {
+		for seed := uint64(1); seed <= 5; seed++ {
+			t.Run("", func(t *testing.T) {
+				rng := rand.New(rand.NewPCG(seed, seed*31))
+				typed := &distHeap{max: isMax}
+				ref := &refHeap{max: isMax}
+
+				const ops = 5000
+				for range ops {
+					switch op := rng.IntN(3); op {
+					case 0, 1: // bias toward push so the heap grows
+						item := heapItem{
+							id:   rng.Uint64(),
+							dist: rng.Float32() * 1000,
+						}
+						typed.push(item)
+						heap.Push(ref, item)
+					case 2:
+						if len(typed.items) == 0 {
+							continue
+						}
+						gotItem := typed.pop()
+						wantItem := heap.Pop(ref).(heapItem)
+						if gotItem != wantItem {
+							t.Fatalf("max=%v seed=%d: pop mismatch got=%+v want=%+v", isMax, seed, gotItem, wantItem)
+						}
+					}
+				}
+				// Drain both and compare order.
+				for len(typed.items) > 0 {
+					gotItem := typed.pop()
+					wantItem := heap.Pop(ref).(heapItem)
+					if gotItem != wantItem {
+						t.Fatalf("max=%v seed=%d (drain): got=%+v want=%+v", isMax, seed, gotItem, wantItem)
+					}
+				}
+				if ref.Len() != 0 {
+					t.Fatalf("ref still has %d items after drain", ref.Len())
+				}
+			})
+		}
+	}
 }
