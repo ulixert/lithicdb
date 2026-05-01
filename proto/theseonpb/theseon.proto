@@ -78,6 +78,11 @@ service InternalService {
   rpc ReplicateVectorWrite(ReplicateVectorWriteRequest) returns (ReplicateVectorWriteResponse);
   rpc ReplicateVectorDelete(ReplicateVectorDeleteRequest) returns (ReplicateVectorDeleteResponse);
   rpc ReplicateVectorSearch(ReplicateVectorSearchRequest) returns (ReplicateVectorSearchResponse);
+
+  // Anti-entropy RPCs - Merkle-tree reconciliation between co-replicas.
+  rpc ComputeAERoot(AERootRequest) returns (AERootResponse);
+  rpc GetAESubtree(AESubtreeRequest) returns (AESubtreeResponse);
+  rpc GetAELeafKeys(AELeafRequest) returns (stream AELeafEntry);
 }
 
 // SWIM Ping - direct probe with piggybacked gossip updates and ring descriptor.
@@ -105,7 +110,7 @@ message PingReqResponse {
   bool ack = 1;
 }
 
-// GossipSync — full membership table exchange for discovery.
+// GossipSync - full membership table exchange for discovery.
 message GossipSyncRequest {
   string sender_id = 1;
   string sender_addr = 2;
@@ -261,6 +266,54 @@ message ReplicateVectorSearchResponse {
   repeated VectorSearchResult results = 1;
 }
 
+// ---- Anti-entropy ----
+//
+// AEKeyspaceDigest pins the parameters of a reconciliation round.
+// Both sides build trees with identical fanout/depth and apply the
+// same grace_cutoff_wall filter. ring_version aborts the round if
+// either side has shifted ring topology mid-reconcile.
+message AEKeyspaceDigest {
+  uint64 ring_version = 1;
+  // Identifies BOTH endpoints unambiguously so each side can compute
+  // the "other" end and apply the symmetric (self, other) filter.
+  string initiator_id = 2;       // node that started this reconcile round
+  string target_id = 3;          // node serving this RPC
+  uint32 depth = 4;
+  uint32 fanout = 5;
+  int64  grace_cutoff_wall = 6;  // hlc.WallTime; entries with WallTime >= this are excluded
+  int32  replication_factor = 7; // N - must agree between sides
+}
+
+message AERootRequest {
+  AEKeyspaceDigest digest = 1;
+}
+
+message AERootResponse {
+  uint64 root_hash = 1;
+  bool   ring_version_mismatch = 2;
+}
+
+message AESubtreeRequest {
+  AEKeyspaceDigest digest = 1;
+  repeated uint32  path = 2;     // child indices from root; empty = root's direct children
+}
+
+message AESubtreeResponse {
+  repeated uint64 child_hashes = 1;
+  bool   ring_version_mismatch = 2;
+}
+
+message AELeafRequest {
+  AEKeyspaceDigest digest = 1;
+  uint32 bucket_index = 2;
+}
+
+message AELeafEntry {
+  bytes        key = 1;
+  HLCTimestamp timestamp = 2;
+  bool         deleted = 3;
+}
+
 // ---- Operator topology management ----
 
 service AdminService {
@@ -269,6 +322,27 @@ service AdminService {
   rpc JoinRing(JoinRingRequest) returns (JoinRingResponse);
   rpc ActivateNode(ActivateNodeRequest) returns (ActivateNodeResponse);
   rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+
+  // Anti-entropy admin: trigger a reconcile against one or all peers.
+  rpc TriggerAntiEntropy(TriggerAERequest) returns (TriggerAEResponse);
+}
+
+message TriggerAERequest {
+  string peer_id = 1;   // empty = all owned peers
+  bool   blocking = 2;  // true = wait for completion, return stats
+}
+
+message TriggerAEResponse {
+  repeated AEReconcileStats stats = 1;
+}
+
+message AEReconcileStats {
+  string peer_id = 1;
+  uint64 keys_scanned = 2;
+  uint64 divergent_leaves = 3;
+  uint64 keys_repaired = 4;
+  int64  duration_ms = 5;
+  string error = 6;
 }
 
 message GetNodeInfoRequest {}

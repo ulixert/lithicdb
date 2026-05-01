@@ -476,13 +476,8 @@ func (c *Coordinator) readRepair(key []byte, newest replicaReadResult, responses
 			rctx, cancel := context.WithTimeout(context.Background(), c.cfg.PerReplicaTimeout)
 			defer cancel()
 
-			var repairErr error
-			if nodeID == c.selfID {
-				repairErr = c.localRepair(key, newest.resp)
-			} else {
-				repairErr = c.remoteWrite(rctx, addr, key,
-					newest.resp.Value, newestTS, newest.resp.Deleted)
-			}
+			repairErr := c.ApplyRepair(rctx, nodeID, addr, key,
+				newest.resp.Value, newestTS, newest.resp.Deleted)
 			if repairErr != nil {
 				c.logger.Warn("read repair failed",
 					"node", nodeID, "key_len", len(key), "err", repairErr)
@@ -494,18 +489,35 @@ func (c *Coordinator) readRepair(key []byte, newest replicaReadResult, responses
 	}
 }
 
-// localRepair writes the repair envelope to the local database.
-func (c *Coordinator) localRepair(key []byte, resp *pb.ReplicateReadResponse) error {
-	ts := protoToHLC(resp.Timestamp)
-	encoded, err := EncodeEnvelope(Envelope{
-		Timestamp: ts,
-		Deleted:   resp.Deleted,
-		Value:     resp.Value,
-	})
-	if err != nil {
-		return err
+// ApplyRepair writes (key, value, ts, deleted) to a single target replica,
+// preserving the source HLC timestamp and tombstone bit bit-for-bit.
+//
+// This is the ONLY sanctioned repair path for read-repair and anti-entropy.
+// It must NOT go through Coordinator.Write/Delete, which stamp clock.Now()
+// and would create a new LWW-winning version, silently clobbering concurrent
+// writes elsewhere. Callers route divergence fixes through this helper.
+//
+// The local path encodes the envelope directly; the remote path uses
+// ReplicateWrite, which carries the source HLCTimestamp verbatim.
+func (c *Coordinator) ApplyRepair(
+	ctx context.Context,
+	targetID, targetAddr string,
+	key, value []byte,
+	ts hlc.Timestamp,
+	deleted bool,
+) error {
+	if targetID == c.selfID {
+		encoded, err := EncodeEnvelope(Envelope{
+			Timestamp: ts,
+			Deleted:   deleted,
+			Value:     value,
+		})
+		if err != nil {
+			return err
+		}
+		return c.localDB.Put(key, encoded)
 	}
-	return c.localDB.Put(key, encoded)
+	return c.remoteWrite(ctx, targetAddr, key, value, ts, deleted)
 }
 
 func protoToHLC(p *pb.HLCTimestamp) hlc.Timestamp {

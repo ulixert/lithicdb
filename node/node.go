@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/ulixert/theseon/cluster"
+	"github.com/ulixert/theseon/cluster/antientropy"
 	"github.com/ulixert/theseon/cluster/hintedhandoff"
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hashring"
@@ -33,9 +34,10 @@ type Config struct {
 	HintDir string // hint store directory (default: DataDir/hints)
 
 	// Cluster
-	SeedPeers []string              // seed addresses for SWIM discovery
-	Cluster   cluster.ClusterConfig // SWIM parameters
-	Coord     cluster.CoordinatorConfig
+	SeedPeers   []string              // seed addresses for SWIM discovery
+	Cluster     cluster.ClusterConfig // SWIM parameters
+	Coord       cluster.CoordinatorConfig
+	AntiEntropy cluster.AntiEntropyConfig
 
 	// Vector
 	Vector vector.VectorStoreConfig
@@ -92,6 +94,30 @@ func (c *Config) defaults() {
 	if c.Coord.PerReplicaTimeout == 0 {
 		c.Coord.PerReplicaTimeout = dco.PerReplicaTimeout
 	}
+	// Anti-entropy: fill non-Enabled defaults so admin-triggered runs work
+	// even when periodic AE is off.
+	dae := cluster.DefaultAntiEntropyConfig()
+	if c.AntiEntropy.Interval == 0 {
+		c.AntiEntropy.Interval = dae.Interval
+	}
+	if c.AntiEntropy.Depth == 0 {
+		c.AntiEntropy.Depth = dae.Depth
+	}
+	if c.AntiEntropy.Fanout == 0 {
+		c.AntiEntropy.Fanout = dae.Fanout
+	}
+	if c.AntiEntropy.GracePeriod == 0 {
+		c.AntiEntropy.GracePeriod = dae.GracePeriod
+	}
+	if c.AntiEntropy.MaxConcurrent == 0 {
+		c.AntiEntropy.MaxConcurrent = dae.MaxConcurrent
+	}
+	if c.AntiEntropy.MaxRepairPerRound == 0 {
+		c.AntiEntropy.MaxRepairPerRound = dae.MaxRepairPerRound
+	}
+	if c.AntiEntropy.ScanKeysPerTick == 0 {
+		c.AntiEntropy.ScanKeysPerTick = dae.ScanKeysPerTick
+	}
 }
 
 // New creates a new Node with the given configuration. Call Start to
@@ -112,6 +138,7 @@ type Node struct {
 	coordinator *cluster.Coordinator
 	hintStore   *hintedhandoff.Store
 	drainer     *hintedhandoff.Drainer
+	antiEntropy *antientropy.Manager
 	srv         *server.Server
 	listener    net.Listener
 	logger      *slog.Logger
@@ -228,7 +255,40 @@ func (n *Node) Start(ctx context.Context) error {
 		VectorDeleteReplay: vectorDeleteReplayFunc,
 	})
 
-	// 11. Wire membership callbacks.
+	// 11. Construct the anti-entropy manager (always created so admin
+	// trigger and the AE RPC service are available; periodic ticker
+	// only runs when AntiEntropy.Enabled is true).
+	aeMgr, err := antientropy.NewManager(antientropy.Config{
+		Cfg:               n.cfg.AntiEntropy,
+		SelfID:            n.cfg.NodeID,
+		Ring:              n.ring,
+		Membership:        &aeMembershipAdapter{n.membership},
+		DB:                database,
+		Dialer:            n.peerPool,
+		Repairer:          n.coordinator,
+		ReplicationFactor: n.cfg.Coord.ReplicationFactor,
+		Logger:            n.logger,
+	})
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("create anti-entropy manager: %w", err)
+	}
+	n.antiEntropy = aeMgr
+
+	// Construct the AE service handler (server-side RPCs).
+	aeSvc := antientropy.NewService(
+		n.cfg.NodeID, n.ring, database,
+		&aeMembershipAdapter{n.membership},
+		n.cfg.Coord.ReplicationFactor, n.logger,
+	)
+
+	// Forward-compat: when MVCC-aware compaction lands
+	// (currently tombstones are never GC'd — see compaction/executor.go:100),
+	// this is where we'd assert tombstoneGrace > AE.Interval + safetyMargin
+	// and fail Start. Today the check is a no-op log line.
+	n.logger.Debug("anti-entropy tombstone-retention check skipped: tombstones currently never GC'd")
+
+	// 12. Wire membership callbacks.
 	n.membership.OnRingChange(func(rd cluster.RingDescriptor) {
 		var nodes []hashring.Node
 		for _, rm := range rd.Members {
@@ -243,37 +303,46 @@ func (n *Node) Start(ctx context.Context) error {
 	n.membership.OnLivenessChange(func(nodeID string, from, to cluster.LivenessState) {
 		if from != cluster.Alive && to == cluster.Alive {
 			n.drainer.TriggerDrain(nodeID)
+			// Anti-entropy on recovery: complements hinted handoff for
+			// hints that expired or were never stored.
+			if n.antiEntropy != nil {
+				n.antiEntropy.TriggerWith(nodeID, antientropy.TriggerRecovery)
+			}
 		}
 	})
 
-	// 12. Create the gRPC server with all options.
+	// 13. Create the gRPC server with all options.
 	n.srv = server.New(database, nil,
 		server.WithMembership(n.membership),
 		server.WithReplication(n.clock, database),
 		server.WithCoordinator(n.coordinator),
 		server.WithVectorStore(n.vectorStore),
+		server.WithAntiEntropy(aeSvc),
 	)
 
-	// 13. Register AdminService.
-	adminSrv := cluster.NewAdminServer(n.membership, n.cfg.NodeID, n.cfg.Addr)
+	// 14. Register AdminService.
+	adminSrv := cluster.NewAdminServer(n.membership, n.cfg.NodeID, n.cfg.Addr, n.antiEntropy)
 	n.srv.RegisterService(&pb.AdminService_ServiceDesc, adminSrv)
 
-	// 14. Start gRPC server (non-blocking) on the already-created listener.
+	// 15. Start gRPC server (non-blocking) on the already-created listener.
 	go func() {
 		if err := n.srv.Serve(lis); err != nil {
 			n.logger.Error("gRPC server error", "err", err)
 		}
 	}()
 
-	// 15. Start membership (SWIM begins, node becomes discoverable).
+	// 16. Start membership (SWIM begins, node becomes discoverable).
 	if err := n.membership.Start(ctx); err != nil {
 		n.srv.GracefulStop()
 		cleanup()
 		return fmt.Errorf("start membership: %w", err)
 	}
 
-	// 16. Start drainer.
+	// 17. Start drainer.
 	n.drainer.Start()
+
+	// 18. Start anti-entropy (no-op if disabled).
+	n.antiEntropy.Start()
 
 	n.logger.Info("node started",
 		"node_id", n.cfg.NodeID,
@@ -292,31 +361,35 @@ func (n *Node) Stop() {
 	if n.srv != nil {
 		n.srv.GracefulStop()
 	}
-	// 2. Stop drainer (waits for in-flight drains).
+	// 2. Stop anti-entropy (waits for in-flight reconciles).
+	if n.antiEntropy != nil {
+		n.antiEntropy.Stop()
+	}
+	// 3. Stop drainer (waits for in-flight drains).
 	if n.drainer != nil {
 		n.drainer.Stop()
 	}
-	// 3. Stop SWIM probe loop.
+	// 4. Stop SWIM probe loop.
 	if n.membership != nil {
 		n.membership.Stop()
 	}
-	// 4. Close peer connections.
+	// 5. Close peer connections.
 	if n.peerPool != nil {
 		n.peerPool.Close()
 	}
-	// 5. Close hint store.
+	// 6. Close hint store.
 	if n.hintStore != nil {
 		if err := n.hintStore.Close(); err != nil {
 			n.logger.Error("close hint store", "err", err)
 		}
 	}
-	// 6. Close vector store (release HNSW memory).
+	// 7. Close vector store (release HNSW memory).
 	if n.vectorStore != nil {
 		if err := n.vectorStore.Close(); err != nil {
 			n.logger.Error("close vector store", "err", err)
 		}
 	}
-	// 7. Close the main database.
+	// 8. Close the main database.
 	if n.database != nil {
 		if err := n.database.Close(); err != nil {
 			n.logger.Error("close database", "err", err)
@@ -352,6 +425,27 @@ func (a *membershipAdapter) GetMemberInfos() []hintedhandoff.MemberInfo {
 		infos[i] = hintedhandoff.MemberInfo{NodeID: ms.NodeID, Addr: ms.Addr}
 	}
 	return infos
+}
+
+// aeMembershipAdapter bridges cluster.Membership to the antientropy
+// MembershipQuerier and the antientropy.MembershipRingVersioner.
+type aeMembershipAdapter struct {
+	m *cluster.Membership
+}
+
+func (a *aeMembershipAdapter) IsAlive(nodeID string) bool { return a.m.IsAlive(nodeID) }
+
+func (a *aeMembershipAdapter) Members() []antientropy.MemberInfo {
+	members := a.m.GetMembers()
+	infos := make([]antientropy.MemberInfo, len(members))
+	for i, ms := range members {
+		infos[i] = antientropy.MemberInfo{NodeID: ms.NodeID, Addr: ms.Addr}
+	}
+	return infos
+}
+
+func (a *aeMembershipAdapter) RingVersion() uint64 {
+	return a.m.GetRingDescriptor().Version
 }
 
 // envelopeDecoder adapts cluster.DecodeEnvelope to hintedhandoff.EnvelopeDecoder.

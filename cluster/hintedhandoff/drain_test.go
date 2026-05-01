@@ -150,6 +150,25 @@ func (c *mockInternalClient) ReplicateVectorSearch(
 	return nil, nil
 }
 
+// Anti-entropy stubs — drainer tests don't exercise AE.
+func (c *mockInternalClient) ComputeAERoot(
+	_ context.Context, _ *pb.AERootRequest, _ ...grpc.CallOption,
+) (*pb.AERootResponse, error) {
+	return nil, nil
+}
+
+func (c *mockInternalClient) GetAESubtree(
+	_ context.Context, _ *pb.AESubtreeRequest, _ ...grpc.CallOption,
+) (*pb.AESubtreeResponse, error) {
+	return nil, nil
+}
+
+func (c *mockInternalClient) GetAELeafKeys(
+	_ context.Context, _ *pb.AELeafRequest, _ ...grpc.CallOption,
+) (pb.InternalService_GetAELeafKeysClient, error) {
+	return nil, nil
+}
+
 func (c *mockInternalClient) getBatches() []*pb.ReplicateWriteBatchRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()

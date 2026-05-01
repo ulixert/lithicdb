@@ -76,6 +76,61 @@ var (
 		},
 		[]string{"rpc"},
 	)
+
+	// --- Anti-entropy ---
+
+	AEReconcilesStarted = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_reconciles_started_total",
+			Help: "Anti-entropy reconciles started, labeled by trigger source.",
+		},
+		[]string{"trigger"}, // timer | recovery | admin
+	)
+
+	AEReconcilesCompleted = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_reconciles_completed_total",
+			Help: "Anti-entropy reconciles completed, labeled by status.",
+		},
+		[]string{"status"}, // success | failure | skipped | ring_version_mismatch
+	)
+
+	AEDivergentLeaves = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_divergent_leaves_total",
+			Help: "Total Merkle-tree leaves found divergent across all reconciles.",
+		},
+	)
+
+	AEKeysRepaired = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_keys_repaired_total",
+			Help: "Keys repaired by anti-entropy, labeled by direction.",
+		},
+		[]string{"direction"}, // push | pull
+	)
+
+	AEKeysScanned = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_keys_scanned_total",
+			Help: "Keys scanned during anti-entropy tree builds.",
+		},
+	)
+
+	AEReconcileDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "theseon_ae_reconcile_duration_seconds",
+			Help:    "End-to-end duration of a single anti-entropy reconcile round.",
+			Buckets: prometheus.ExponentialBuckets(0.01, 2, 16), // 10ms ... ~5min
+		},
+	)
+
+	AEInFlight = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "theseon_ae_in_flight",
+			Help: "Currently-running anti-entropy reconciles.",
+		},
+	)
 )
 
 func init() {
@@ -88,6 +143,13 @@ func init() {
 		SSTableCount,
 		HintDrainBatches,
 		ClusterRPCDuration,
+		AEReconcilesStarted,
+		AEReconcilesCompleted,
+		AEDivergentLeaves,
+		AEKeysRepaired,
+		AEKeysScanned,
+		AEReconcileDuration,
+		AEInFlight,
 	)
 }
 
