@@ -7,6 +7,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ulixert/theseon/cluster"
+	"github.com/ulixert/theseon/cluster/antientropy"
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hlc"
 	"github.com/ulixert/theseon/metrics"
@@ -22,9 +23,44 @@ import (
 type internalServer struct {
 	pb.UnimplementedInternalServiceServer
 	membership  *cluster.Membership
-	clock       *hlc.Clock          // nil in standalone mode
-	db          *db.DB              // nil in standalone mode
-	vectorStore *vector.VectorStore // nil if vector store not configured
+	clock       *hlc.Clock           // nil in standalone mode
+	db          *db.DB               // nil in standalone mode
+	vectorStore *vector.VectorStore  // nil if vector store not configured
+	ae          *antientropy.Service // nil if anti-entropy not configured
+}
+
+// --- Anti-entropy handlers ---
+//
+// Each method is a thin delegate to the antientropy.Service. When the
+// service is nil (standalone mode or AE not configured), we return
+// Unavailable so the initiator can distinguish missing config from
+// genuine errors.
+
+func (s *internalServer) ComputeAERoot(ctx context.Context, req *pb.AERootRequest) (*pb.AERootResponse, error) {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("compute_ae_root"))
+	defer timer.ObserveDuration()
+	if s.ae == nil {
+		return nil, status.Error(codes.Unavailable, "anti-entropy not configured")
+	}
+	return s.ae.ComputeAERoot(ctx, req)
+}
+
+func (s *internalServer) GetAESubtree(ctx context.Context, req *pb.AESubtreeRequest) (*pb.AESubtreeResponse, error) {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("get_ae_subtree"))
+	defer timer.ObserveDuration()
+	if s.ae == nil {
+		return nil, status.Error(codes.Unavailable, "anti-entropy not configured")
+	}
+	return s.ae.GetAESubtree(ctx, req)
+}
+
+func (s *internalServer) GetAELeafKeys(req *pb.AELeafRequest, stream pb.InternalService_GetAELeafKeysServer) error {
+	timer := prometheus.NewTimer(metrics.ClusterRPCDuration.WithLabelValues("get_ae_leaf_keys"))
+	defer timer.ObserveDuration()
+	if s.ae == nil {
+		return status.Error(codes.Unavailable, "anti-entropy not configured")
+	}
+	return s.ae.GetAELeafKeys(req, stream)
 }
 
 func (s *internalServer) Ping(_ context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {

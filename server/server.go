@@ -16,6 +16,7 @@ import (
 	"net"
 
 	"github.com/ulixert/theseon/cluster"
+	"github.com/ulixert/theseon/cluster/antientropy"
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hlc"
 	pb "github.com/ulixert/theseon/proto/theseonpb"
@@ -47,6 +48,7 @@ type serverConfig struct {
 	database    *db.DB
 	coordinator *cluster.Coordinator
 	vectorStore *vector.VectorStore
+	aeService   *antientropy.Service
 }
 
 // WithMembership configures the server to register the InternalService
@@ -84,6 +86,14 @@ func WithVectorStore(vs *vector.VectorStore) Option {
 	}
 }
 
+// WithAntiEntropy registers the anti-entropy service handlers on the
+// InternalService. When omitted, the AE RPCs return Unavailable.
+func WithAntiEntropy(svc *antientropy.Service) Option {
+	return func(c *serverConfig) {
+		c.aeService = svc
+	}
+}
+
 // New creates a gRPC server that serves the Theseon service backed
 // by the given database. The caller retains ownership of the database
 // and must close it after stopping the server.
@@ -109,6 +119,7 @@ func New(database *db.DB, grpcOpts []grpc.ServerOption, opts ...Option) *Server 
 			clock:       cfg.clock,
 			db:          cfg.database,
 			vectorStore: cfg.vectorStore,
+			ae:          cfg.aeService,
 		})
 	}
 
