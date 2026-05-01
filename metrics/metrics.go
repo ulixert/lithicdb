@@ -79,6 +79,22 @@ var (
 
 	// --- Anti-entropy ---
 
+	AEReconcilesStarted = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_reconciles_started_total",
+			Help: "Anti-entropy reconciles started, labeled by trigger source.",
+		},
+		[]string{"trigger"}, // timer | recovery | admin
+	)
+
+	AEReconcilesCompleted = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "theseon_ae_reconciles_completed_total",
+			Help: "Anti-entropy reconciles completed, labeled by status.",
+		},
+		[]string{"status"}, // success | failure | skipped | ring_version_mismatch
+	)
+
 	AEDivergentLeaves = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "theseon_ae_divergent_leaves_total",
@@ -108,6 +124,13 @@ var (
 			Buckets: prometheus.ExponentialBuckets(0.01, 2, 16), // 10ms ... ~5min
 		},
 	)
+
+	AEInFlight = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "theseon_ae_in_flight",
+			Help: "Currently-running anti-entropy reconciles.",
+		},
+	)
 )
 
 func init() {
@@ -120,10 +143,13 @@ func init() {
 		SSTableCount,
 		HintDrainBatches,
 		ClusterRPCDuration,
+		AEReconcilesStarted,
+		AEReconcilesCompleted,
 		AEDivergentLeaves,
 		AEKeysRepaired,
 		AEKeysScanned,
 		AEReconcileDuration,
+		AEInFlight,
 	)
 }
 

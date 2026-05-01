@@ -1,7 +1,9 @@
 package antientropy
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/ulixert/theseon/cluster"
 	"github.com/ulixert/theseon/db"
 	"github.com/ulixert/theseon/hashring"
+	"github.com/ulixert/theseon/metrics"
 )
 
 // MemberInfo captures the subset of node identity needed to resolve a
@@ -133,4 +136,173 @@ func NewManager(cfg Config) (*Manager, error) {
 		stopCh:            make(chan struct{}),
 		rng:               func() uint64 { return uint64(time.Now().UnixNano()) },
 	}, nil
+}
+
+// Start launches the periodic ticker if Enabled. No-op when disabled -
+// in that case Trigger / TriggerSync still work for admin paths.
+func (m *Manager) Start() {
+	if !m.cfg.Enabled {
+		m.logger.Info("anti-entropy disabled; admin path remains available")
+		return
+	}
+	m.wg.Add(1)
+	go m.tickLoop()
+}
+
+// Stop signals the ticker to exit and waits for in-flight reconciles to
+// finish.
+func (m *Manager) Stop() {
+	select {
+	case <-m.stopCh:
+		// already stopped
+	default:
+		close(m.stopCh)
+	}
+	m.wg.Wait()
+}
+
+// Trigger is the cluster.AntiEntropyTrigger entry point - non-blocking
+// reconcile against peerID, labeled "admin" for metrics.
+func (m *Manager) Trigger(peerID string) {
+	m.triggerInternal(peerID, TriggerAdmin)
+}
+
+// TriggerWith fires a non-blocking reconcile labeled with the caller-
+// supplied trigger source. Used internally by the timer loop and the
+// recovery callback.
+func (m *Manager) TriggerWith(peerID string, trigger Trigger) {
+	m.triggerInternal(peerID, trigger)
+}
+
+func (m *Manager) triggerInternal(peerID string, trigger Trigger) {
+	if peerID == "" || peerID == m.selfID {
+		return
+	}
+	if m.tryAcquire(peerID) {
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			defer m.release(peerID)
+			ctx, cancel := context.WithCancel(context.Background())
+			go func() {
+				select {
+				case <-m.stopCh:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+			defer cancel()
+			_ = m.runOne(ctx, peerID, trigger)
+		}()
+	}
+}
+
+// tryAcquire reserves a slot + per-peer dedup. Non-blocking. Returns
+// true if the caller now holds the reservation and should proceed.
+func (m *Manager) tryAcquire(peerID string) bool {
+	m.mu.Lock()
+	if _, dup := m.inflight[peerID]; dup {
+		m.mu.Unlock()
+		return false
+	}
+	// Try sema non-blockingly.
+	select {
+	case m.sema <- struct{}{}:
+	default:
+		m.mu.Unlock()
+		return false
+	}
+	m.inflight[peerID] = struct{}{}
+	m.mu.Unlock()
+	return true
+}
+
+func (m *Manager) release(peerID string) {
+	m.mu.Lock()
+	delete(m.inflight, peerID)
+	m.mu.Unlock()
+	<-m.sema
+}
+
+// runOne executes a single reconcile and emits metrics. The semaphore
+// and inflight map must be held by the caller.
+func (m *Manager) runOne(ctx context.Context, peerID string, trigger Trigger) ReconcileStats {
+	addr := m.peerAddr(peerID)
+	if addr == "" {
+		stats := ReconcileStats{PeerID: peerID, Err: fmt.Errorf("peer %s not found in membership", peerID)}
+		m.logger.Warn("anti-entropy skipping peer with unresolved address", "peer", peerID)
+		metrics.AEReconcilesCompleted.WithLabelValues("skipped").Inc()
+		return stats
+	}
+	if !m.membership.IsAlive(peerID) {
+		stats := ReconcileStats{PeerID: peerID, Err: fmt.Errorf("peer %s is not alive", peerID)}
+		metrics.AEReconcilesCompleted.WithLabelValues("skipped").Inc()
+		return stats
+	}
+
+	metrics.AEReconcilesStarted.WithLabelValues(string(trigger)).Inc()
+	metrics.AEInFlight.Inc()
+	defer metrics.AEInFlight.Dec()
+
+	rec := newReconciler(
+		m.selfID, peerID, addr,
+		m.ring, m.database, m.dialer, m.repairer,
+		m.cfg, m.membership.RingVersion(), m.replicationFactor,
+		m.logger,
+	)
+	stats := rec.Run(ctx)
+
+	switch {
+	case stats.Err == nil:
+		metrics.AEReconcilesCompleted.WithLabelValues("success").Inc()
+		m.logger.Debug("anti-entropy reconcile complete",
+			"peer", peerID,
+			"trigger", trigger,
+			"keys_scanned", stats.KeysScanned,
+			"divergent_leaves", stats.DivergentLeaves,
+			"keys_repaired", stats.KeysRepaired,
+			"duration_ms", stats.Duration.Milliseconds())
+	case errors.Is(stats.Err, ErrRingVersionMismatch):
+		metrics.AEReconcilesCompleted.WithLabelValues("ring_version_mismatch").Inc()
+		m.logger.Info("anti-entropy aborted: ring version mismatch", "peer", peerID)
+	default:
+		metrics.AEReconcilesCompleted.WithLabelValues("failure").Inc()
+		m.logger.Warn("anti-entropy reconcile failed",
+			"peer", peerID, "trigger", trigger, "err", stats.Err)
+	}
+	return stats
+}
+
+func (m *Manager) peerAddr(peerID string) string {
+	for _, mi := range m.membership.Members() {
+		if mi.NodeID == peerID {
+			return mi.Addr
+		}
+	}
+	return ""
+}
+
+// tickLoop runs the periodic reconcile schedule. Each tick advances
+// through the owned-peer list one peer at a time.
+func (m *Manager) tickLoop() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(m.cfg.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			peers := OwnedPeers(m.ring, m.selfID, m.replicationFactor)
+			if len(peers) == 0 {
+				continue
+			}
+			// Round-robin: pick the next peer based on monotonic tick.
+			idx := int(m.tick % uint64(len(peers)))
+			m.tick++
+			m.triggerInternal(peers[idx], TriggerTimer)
+		}
+	}
 }
