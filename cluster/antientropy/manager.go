@@ -197,6 +197,79 @@ func (m *Manager) triggerInternal(peerID string, trigger Trigger) {
 	}
 }
 
+// TriggerSync runs a reconcile and blocks until it completes, returning
+// stats in the cluster.AntiEntropyReconcileStat shape. Satisfies
+// cluster.AntiEntropyTrigger.
+func (m *Manager) TriggerSync(ctx context.Context, peerID string) (cluster.AntiEntropyReconcileStat, error) {
+	if peerID == "" {
+		return cluster.AntiEntropyReconcileStat{}, errors.New("antientropy: peerID is required for sync trigger")
+	}
+	if peerID == m.selfID {
+		return cluster.AntiEntropyReconcileStat{}, errors.New("antientropy: cannot reconcile with self")
+	}
+	// Wait for slot.
+	select {
+	case <-ctx.Done():
+		return cluster.AntiEntropyReconcileStat{}, ctx.Err()
+	case m.sema <- struct{}{}:
+	}
+	defer func() { <-m.sema }()
+
+	m.mu.Lock()
+	m.inflight[peerID] = struct{}{}
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.inflight, peerID)
+		m.mu.Unlock()
+	}()
+
+	return m.runOneStat(ctx, peerID, TriggerAdmin), nil
+}
+
+// runOneStat is runOne adapted to return the public cluster shape.
+func (m *Manager) runOneStat(ctx context.Context, peerID string, trigger Trigger) cluster.AntiEntropyReconcileStat {
+	stats := m.runOne(ctx, peerID, trigger)
+	return cluster.AntiEntropyReconcileStat{
+		PeerID:          stats.PeerID,
+		KeysScanned:     stats.KeysScanned,
+		DivergentLeaves: stats.DivergentLeaves,
+		KeysRepaired:    stats.KeysRepaired,
+		DurationMillis:  stats.Duration.Milliseconds(),
+		Err:             stats.Err,
+	}
+}
+
+// TriggerAll satisfies cluster.AntiEntropyTrigger; reconciles all
+// owned peers under the "admin" label.
+func (m *Manager) TriggerAll() {
+	m.TriggerAllWith(TriggerAdmin)
+}
+
+// TriggerAllWith fires triggerInternal against every owned peer with the
+// given label. Non-blocking.
+func (m *Manager) TriggerAllWith(trigger Trigger) {
+	for _, peer := range OwnedPeers(m.ring, m.selfID, m.replicationFactor) {
+		m.triggerInternal(peer, trigger)
+	}
+}
+
+// TriggerSyncAll runs reconciles against every owned peer in series.
+// Satisfies cluster.AntiEntropyTrigger.
+func (m *Manager) TriggerSyncAll(ctx context.Context) []cluster.AntiEntropyReconcileStat {
+	peers := OwnedPeers(m.ring, m.selfID, m.replicationFactor)
+	out := make([]cluster.AntiEntropyReconcileStat, 0, len(peers))
+	for _, peer := range peers {
+		stats, err := m.TriggerSync(ctx, peer)
+		if err != nil {
+			stats.PeerID = peer
+			stats.Err = err
+		}
+		out = append(out, stats)
+	}
+	return out
+}
+
 // tryAcquire reserves a slot + per-peer dedup. Non-blocking. Returns
 // true if the caller now holds the reservation and should proceed.
 func (m *Manager) tryAcquire(peerID string) bool {

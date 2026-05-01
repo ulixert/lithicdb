@@ -9,6 +9,18 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// AntiEntropyReconcileStat is the cluster-package mirror of the
+// antientropy.ReconcileStats type. Defined here to keep cluster
+// independent of cluster/antientropy (which depends on cluster).
+type AntiEntropyReconcileStat struct {
+	PeerID          string
+	KeysScanned     uint64
+	DivergentLeaves uint64
+	KeysRepaired    uint64
+	DurationMillis  int64
+	Err             error
+}
+
 // adminServer implements the AdminService gRPC interface for cluster
 // topology management. All ring-mutating operations use CAS via
 // expected_version to prevent conflicting concurrent changes.
