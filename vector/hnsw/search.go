@@ -139,6 +139,15 @@ func (h *distHeap) down(i, n int) {
 	}
 }
 
+// visitedPool hands out reusable map[uint64]bool sets for searchLayer.
+// Concurrent searches each Get one and Put it back; clear() resets state
+// without freeing the underlying buckets.
+var visitedPool = sync.Pool{
+	New: func() any {
+		return new(make(map[uint64]bool, 256))
+	},
+}
+
 // heapPool hands out reusable []heapItem backing slices for the candidate
 // and result heaps. The pointer-to-slice wrapper avoids any-boxing the
 // slice header on Put. Capacity is preserved across Get/Put so the
@@ -157,7 +166,11 @@ var heapPool = sync.Pool{
 // hold at least an RLock on g.mu.
 func (g *Graph) searchLayer(query []float32, entryIDs []uint64, ef int, layer int) []heapItem {
 	dist := g.opts.Dist
-	visited := make(map[uint64]bool, ef*2)
+
+	visitedP := visitedPool.Get().(*map[uint64]bool)
+	visited := *visitedP
+	clear(visited)
+	defer visitedPool.Put(visitedP)
 
 	candP := heapPool.Get().(*[]heapItem)
 	candidates := &distHeap{items: (*candP)[:0], max: false} // min-heap: closest first
