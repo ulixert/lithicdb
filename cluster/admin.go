@@ -21,6 +21,27 @@ type AntiEntropyReconcileStat struct {
 	Err             error
 }
 
+// AntiEntropyTrigger is the contract NewAdminServer accepts for serving
+// the TriggerAntiEntropy admin RPC. *antientropy.Manager satisfies it
+// structurally — the cluster package never names that type, avoiding
+// an import cycle.
+type AntiEntropyTrigger interface {
+	// Trigger schedules a non-blocking reconcile against peerID. Trigger
+	// label is "admin" when invoked from this path.
+	Trigger(peerID string)
+
+	// TriggerAll schedules reconciles against all owned peers (non-blocking).
+	TriggerAll()
+
+	// TriggerSync runs a reconcile against peerID and blocks until it
+	// completes. Returns a single stat.
+	TriggerSync(ctx context.Context, peerID string) (AntiEntropyReconcileStat, error)
+
+	// TriggerSyncAll runs reconciles against every owned peer in series
+	// and returns per-peer stats.
+	TriggerSyncAll(ctx context.Context) []AntiEntropyReconcileStat
+}
+
 // adminServer implements the AdminService gRPC interface for cluster
 // topology management. All ring-mutating operations use CAS via
 // expected_version to prevent conflicting concurrent changes.
@@ -29,15 +50,19 @@ type adminServer struct {
 	membership *Membership
 	selfID     string
 	selfAddr   string
+	ae         AntiEntropyTrigger // nil = TriggerAntiEntropy returns Unavailable
 }
 
 // NewAdminServer creates an AdminService handler backed by the given
-// Membership instance. selfID and selfAddr identify this node.
-func NewAdminServer(membership *Membership, selfID, selfAddr string) pb.AdminServiceServer {
+// Membership instance. selfID and selfAddr identify this node. The
+// optional AntiEntropyTrigger powers the TriggerAntiEntropy RPC; if nil,
+// that RPC returns Unavailable.
+func NewAdminServer(membership *Membership, selfID, selfAddr string, ae AntiEntropyTrigger) pb.AdminServiceServer {
 	return &adminServer{
 		membership: membership,
 		selfID:     selfID,
 		selfAddr:   selfAddr,
+		ae:         ae,
 	}
 }
 
@@ -188,6 +213,55 @@ func (a *adminServer) RemoveNode(_ context.Context, req *pb.RemoveNodeRequest) (
 		return nil, status.Errorf(codes.Internal, "apply ring descriptor: %v", err)
 	}
 	return &pb.RemoveNodeResponse{}, nil
+}
+
+// TriggerAntiEntropy invokes the registered anti-entropy manager.
+// Non-blocking by default; if blocking=true, waits for completion and
+// returns per-peer stats. peer_id="" reconciles against all owned peers.
+func (a *adminServer) TriggerAntiEntropy(ctx context.Context, req *pb.TriggerAERequest) (*pb.TriggerAEResponse, error) {
+	if a.ae == nil {
+		return nil, status.Error(codes.Unavailable, "anti-entropy not configured")
+	}
+
+	if !req.Blocking {
+		// Non-blocking path: schedule and return immediately.
+		if req.PeerId == "" {
+			a.ae.TriggerAll()
+		} else {
+			a.ae.Trigger(req.PeerId)
+		}
+		return &pb.TriggerAEResponse{}, nil
+	}
+
+	// Blocking path: gather per-peer stats.
+	var stats []AntiEntropyReconcileStat
+	if req.PeerId == "" {
+		stats = a.ae.TriggerSyncAll(ctx)
+	} else {
+		one, err := a.ae.TriggerSync(ctx, req.PeerId)
+		if err != nil {
+			one.PeerID = req.PeerId
+			one.Err = err
+		}
+		stats = []AntiEntropyReconcileStat{one}
+	}
+
+	resp := &pb.TriggerAEResponse{Stats: make([]*pb.AEReconcileStats, 0, len(stats))}
+	for _, s := range stats {
+		errStr := ""
+		if s.Err != nil {
+			errStr = s.Err.Error()
+		}
+		resp.Stats = append(resp.Stats, &pb.AEReconcileStats{
+			PeerId:          s.PeerID,
+			KeysScanned:     s.KeysScanned,
+			DivergentLeaves: s.DivergentLeaves,
+			KeysRepaired:    s.KeysRepaired,
+			DurationMs:      s.DurationMillis,
+			Error:           errStr,
+		})
+	}
+	return resp, nil
 }
 
 func adminRingDescToProto(rd *RingDescriptor) *pb.RingDescriptorProto {
