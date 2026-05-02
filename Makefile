@@ -1,4 +1,4 @@
-.PHONY: all build test test-v test-race test-integration test-integration-race bench lint fmt vet clean proto
+.PHONY: all build test test-v test-race test-integration test-integration-race bench lint fmt vet clean proto gen-simd bench-build
 
 # Default: run all checks
 all: fmt vet lint test-race
@@ -6,6 +6,16 @@ all: fmt vet lint test-race
 # Build the project
 build:
 	go build ./...
+
+gen-simd:
+	go run ./internal/simd/asm/amd64/main.go \
+	    -out internal/simd/l2_amd64.s \
+	    -stubs internal/simd/l2_amd64.go \
+	    -pkg simd
+
+bench-build:
+	go -C benchmarks build -o /tmp/theseon-vector-bench ./vector/
+	go -C benchmarks build -o /tmp/theseon-kv-bench    ./kv_single_node/
 
 # Run tests
 test:
