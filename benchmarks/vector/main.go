@@ -44,6 +44,19 @@ func main() {
 	cpuProfile := flag.String("cpuprofile", "", "write CPU profile of the search sweep to this path (build phase is excluded)")
 	flag.Parse()
 
+	if *cpuProfile != "" {
+		if err := os.MkdirAll(filepath.Dir(*cpuProfile), 0o755); err != nil {
+			log.Fatalf("cpuprofile dir: %v", err)
+		}
+		// Touch-test the file so it will fail before a long build.
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			log.Fatalf("cpuprofile create: %v", err)
+		}
+		_ = f.Close()
+		_ = os.Remove(*cpuProfile)
+	}
+
 	efSweep := []int{20, 50, 100, 200, 500, 1000}
 
 	log.Printf("loading SIFT-1M …")
@@ -133,14 +146,16 @@ func main() {
 	if *cpuProfile != "" {
 		pf, err := os.Create(*cpuProfile)
 		if err != nil {
-			log.Fatalf("create cpuprofile: %v", err)
+			log.Printf("cpuprofile create failed (continuing without profile): %v", err)
+		} else {
+			defer pf.Close()
+			if err := pprof.StartCPUProfile(pf); err != nil {
+				log.Printf("start cpuprofile failed: %v", err)
+			} else {
+				defer pprof.StopCPUProfile()
+				log.Printf("cpu profile: %s", *cpuProfile)
+			}
 		}
-		defer pf.Close()
-		if err := pprof.StartCPUProfile(pf); err != nil {
-			log.Fatalf("start cpuprofile: %v", err)
-		}
-		defer pprof.StopCPUProfile()
-		log.Printf("cpu profile: %s (search sweep only)", *cpuProfile)
 	}
 
 	for _, ef := range efSweep {
