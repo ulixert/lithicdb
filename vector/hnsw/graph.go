@@ -9,6 +9,8 @@ import (
 	"math/rand/v2"
 	"slices"
 	"sync"
+
+	"github.com/ulixert/theseon/internal/simd"
 )
 
 var (
@@ -30,13 +32,18 @@ type Options struct {
 }
 
 // DefaultOptions returns reasonable defaults for the given dimensionality.
+//
+// Dist is wired directly to simd.L2SquaredFloat32 (the SIMD-dispatched
+// kernel) rather than the DistanceL2Squared wrapper, so the search hot
+// path performs only one indirect call (through opts.Dist) per distance
+// computation instead of two.
 func DefaultOptions(dim int) Options {
 	return Options{
 		M:           16,
 		EfConstruct: 200,
 		EfSearch:    50,
 		Dim:         dim,
-		Dist:        DistanceL2Squared,
+		Dist:        simd.L2SquaredFloat32,
 	}
 }
 

@@ -9,12 +9,12 @@ package hashring
 
 import (
 	"cmp"
-	"crypto/sha256"
-	"encoding/binary"
 	"slices"
 	"sort"
 	"strconv"
 	"sync"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 // Node represents a physical node in the cluster.
@@ -291,13 +291,11 @@ func hashVnode(nodeID string, index int) uint64 {
 	buf = append(buf, nodeID...)
 	buf = append(buf, '-')
 	buf = strconv.AppendInt(buf, int64(index), 10)
-	sum := sha256.Sum256(buf)
-	return binary.BigEndian.Uint64(sum[:8])
+	return xxhash.Sum64(buf)
 }
 
 // hashKey computes the ring position for an arbitrary key.
 // SHA-256 of raw key bytes, truncated to uint64.
 func hashKey(key []byte) uint64 {
-	sum := sha256.Sum256(key)
-	return binary.BigEndian.Uint64(sum[:8])
+	return xxhash.Sum64(key)
 }

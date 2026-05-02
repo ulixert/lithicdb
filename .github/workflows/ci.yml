@@ -23,3 +23,36 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test -tags=integration -race ./node/...
+
+  # SIMD kernel matrix: every (arch, tags) cell exercises a different code path.
+  #   ubuntu-latest   + ""        → x86 AVX2+FMA dispatch
+  #   ubuntu-latest   + purego    → x86 generic Go fallback
+  #   ubuntu-24.04-arm + ""       → ARM64 NEON dispatch
+  #   ubuntu-24.04-arm + purego   → ARM64 generic Go fallback
+  # The simd test suite is small (~1s) so the cross-product is cheap.
+  simd:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+        tags: ["", "purego"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Show CPU features
+        run: |
+          if [ -f /proc/cpuinfo ]; then
+            grep -m1 "model name\|Features\|flags" /proc/cpuinfo || true
+          fi
+      - name: Test SIMD package
+        run: go test -race ${{ matrix.tags && format('-tags={0}', matrix.tags) || '' }} ./internal/simd/...
+      - name: Benchmark SIMD package (smoke, no race)
+        run: |
+          go test ${{ matrix.tags && format('-tags={0}', matrix.tags) || '' }} \
+            -run='^$' -bench=BenchmarkL2Squared -benchtime=200ms -benchmem \
+            ./internal/simd/...
+      - name: Fuzz SIMD against generic oracle
+        run: go test ${{ matrix.tags && format('-tags={0}', matrix.tags) || '' }} -run='^$' -fuzz=FuzzL2Squared -fuzztime=10s ./internal/simd/

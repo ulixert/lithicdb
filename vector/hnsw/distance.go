@@ -1,6 +1,10 @@
 package hnsw
 
-import "math"
+import (
+	"math"
+
+	"github.com/ulixert/theseon/internal/simd"
+)
 
 // DistanceFunc computes the distance between two vectors of equal length.
 // Smaller values indicate more similar vectors. Callers must ensure both
@@ -9,14 +13,15 @@ import "math"
 type DistanceFunc func(a, b []float32) float32
 
 // DistanceL2Squared returns the squared Euclidean distance between a and b.
-// Using squared distance avoids an expensive sqrt while preserving ordering.
+// The implementation delegates to internal/simd, which picks the best
+// kernel at init() time (NEON on arm64, AVX2 on amd64, generic Go
+// otherwise or under -tags=purego).
+//
+// DefaultOptions wires Options.Dist directly to simd.L2SquaredFloat32 to
+// skip this wrapper in the search hot path; direct callers of this
+// function pay one extra indirect call.
 func DistanceL2Squared(a, b []float32) float32 {
-	var sum float32
-	for i := range a {
-		d := a[i] - b[i]
-		sum += d * d
-	}
-	return sum
+	return simd.L2SquaredFloat32(a, b)
 }
 
 // DistanceCosine returns 1 - cos(a, b), ranging from 0 (identical direction)
