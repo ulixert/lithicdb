@@ -22,6 +22,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"slices"
 	"strconv"
 	"time"
@@ -40,6 +41,7 @@ func main() {
 	efConstruct := flag.Int("ef-construct", 200, "HNSW EfConstruct")
 	k := flag.Int("k", 10, "k for recall@k")
 	outPath := flag.String("out", "benchmarks/out/vector.csv", "output CSV path")
+	cpuProfile := flag.String("cpuprofile", "", "write CPU profile of the search sweep to this path (build phase is excluded)")
 	flag.Parse()
 
 	efSweep := []int{20, 50, 100, 200, 500, 1000}
@@ -127,6 +129,19 @@ func main() {
 	w := csv.NewWriter(f)
 	defer w.Flush()
 	_ = w.Write([]string{"ef_search", "recall_at_10", "qps", "p50_ms", "p95_ms", "p99_ms", "num_queries"})
+
+	if *cpuProfile != "" {
+		pf, err := os.Create(*cpuProfile)
+		if err != nil {
+			log.Fatalf("create cpuprofile: %v", err)
+		}
+		defer pf.Close()
+		if err := pprof.StartCPUProfile(pf); err != nil {
+			log.Fatalf("start cpuprofile: %v", err)
+		}
+		defer pprof.StopCPUProfile()
+		log.Printf("cpu profile: %s (search sweep only)", *cpuProfile)
+	}
 
 	for _, ef := range efSweep {
 		log.Printf("sweep ef_search=%d …", ef)
