@@ -7,16 +7,6 @@ all: fmt vet lint test-race
 build:
 	go build ./...
 
-gen-simd:
-	go run ./internal/simd/asm/amd64/main.go \
-	    -out internal/simd/l2_amd64.s \
-	    -stubs internal/simd/l2_amd64.go \
-	    -pkg simd
-
-bench-build:
-	go -C benchmarks build -o /tmp/theseon-vector-bench ./vector/
-	go -C benchmarks build -o /tmp/theseon-kv-bench    ./kv_single_node/
-
 # Run tests
 test:
 	go test ./...
@@ -59,6 +49,19 @@ proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
 	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
 	       proto/theseonpb/theseon.proto
+
+# Build the benchmark.
+bench-build:
+	go -C benchmarks build -o /tmp/theseon-vector-bench ./vector/
+	go -C benchmarks build -o /tmp/theseon-kv-bench    ./kv_single_node/
+
+# Regenerate AMD64 SIMD assembly from the avo source.
+# Output is committed alongside the source.
+gen-simd:
+	go run ./internal/simd/asm/amd64/main.go \
+	    -out internal/simd/l2_amd64.s \
+	    -stubs internal/simd/l2_amd64.go \
+	    -pkg simd
 
 # Remove test artifacts and generated data
 clean:
