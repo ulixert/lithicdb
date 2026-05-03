@@ -4,14 +4,15 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/ulixert/theseon)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A distributed LSM-tree storage engine with native vector search, built from scratch in Go.
+A distributed LSM-tree storage engine with native vector search and hand-written SIMD distance kernels, built from scratch in Go.
 
-Every core component — skip list, WAL, SSTable format, bloom filter, merge iterator, leveled compaction, snapshot
-isolation, optimistic transactions — is hand-built. The distributed layer — consistent hashing, hybrid logical clocks,
-SWIM gossip, quorum coordination, hinted handoff, merkle-tree anti-entropy — is equally from scratch. The vector search
-layer — HNSW index, binary vector encoding, snapshot persistence, metadata filtering, distributed fan-out — is built on
-the same foundation: vectors are regular KV entries, so replication and repair come for free. Only gRPC and protobuf use
-external libraries.
+**Storage:** skip list, WAL with CRC32 framing, mmap'd block-based SSTable format, bloom filters, merge iterator, leveled compaction with MVCC-aware GC, snapshot isolation, optimistic transactions — all hand-implemented.
+
+**Distribution:** consistent hashing with virtual nodes, hybrid logical clocks, SWIM gossip, quorum coordination with tunable R/W, hinted handoff, Merkle-tree anti-entropy — Dynamo-style leaderless replication, no leader election.
+
+**Vector search:** HNSW index, binary vector encoding, snapshot persistence, distributed fan-out, allocation-free graph traversal, and architecture-specific SIMD distance kernels (AVX2+FMA on x86 generated via avo, hand-written ARM64 NEON in Plan 9 assembly). Vectors are regular KV entries, so replication and repair come for free.
+
+External dependencies are limited to transport (gRPC/protobuf), telemetry (Prometheus), hashing (xxhash), and CPU feature detection (`golang.org/x/sys`). Benchmarks compare against [CockroachDB's Pebble](https://github.com/cockroachdb/pebble) as a reference engine, isolated in a Go sub-module so the main `go.mod` carries no competing-engine deps.
 
 > "Theseon" comes from the Greek _Theseion_ — the Temple of Hephaestus in Athens, one of the best-preserved ancient
 > structures. It also evokes Theseus navigating the labyrinth, which is roughly what HNSW does: traversing layers of
@@ -19,25 +20,33 @@ external libraries.
 
 ---
 
-### 📊 [Benchmarking Theseon: KV, Cluster, Chaos, and HNSW on SIFT-1M](https://ulixert.github.io/posts/theseon-benchmarks/)
+## Highlights
 
-The latest post in the series. Four benchmark harnesses, five charts, and a debugging story.
+- **Vector search:** HNSW on SIFT-1M hits **95% recall@10 at ~1116 QPS** (1M × 128-dim, single-thread M1) — **+34% vs the pre-SIMD baseline**, after a profile-driven optimization pass that reshaped the search hot path.
+- **Cross-architecture SIMD distance kernels.** AVX2+FMA on x86 (avo-generated) and hand-written ARM64 NEON in Plan 9 assembly, with runtime CPU dispatch (`HasAVX2 && HasFMA` / `HasASIMD`) and a generic Go fallback. Validated in CI on Intel Xeon, AWS Graviton, and AMD EPYC. Kernel speedup: **3.9–7.5× on M1 NEON, ~10–14× on Intel Xeon AVX2** across d=128–1536.
+- **Allocation-free HNSW search path.** Pooled visited-set, typed candidate heap replacing `container/heap` (avoiding interface boxing in the inner loop). `allocs/op 442 → 2`; `-race` clean under concurrent search.
+- **Distributed correctness under load.** 3-node cluster holds **0% client-visible error rate through a 60-second node outage** under chaos testing — quorum coordination masks the failure entirely.
+- **LSM engine matches CockroachDB's Pebble within ~5%** on YCSB-A/B/C at equal cache budgets (~430K reads/sec on YCSB-C, 2M-key workload).
 
-- **Single-node**: Theseon matches Pebble on read throughput (~430K ops/sec) under equal cache budgets.
-- **Cluster & chaos**: 3-node cluster sustains ~1.9K ops/sec on read-heavy workloads at N=3/W=2/R=2, and **client-visible error rate stays at 0% throughout a 60-second node outage** — quorum masks the failure completely.
-- **Vector**: HNSW on SIFT-1M hits **95% recall@10 at ~830 QPS**, with SIMD identified as the next major bottleneck.
-- **Debugging story**: the first cluster run reported 100% errors on one quorum config. Tracing it revealed a `BatchWrite` handler silently bypassing the coordinator, not the read path I was investigating. Details in the post.
+### 📊 Featured posts
+
+- **[Benchmarking Theseon (v0.13)](.../theseon-benchmarks/)** — comprehensive performance analysis: KV vs Pebble parity, cluster + chaos quorum sweeps, vector recall/QPS sweep on SIFT-1M, full methodology + the (3,1,3) null-result debugging story.
+- **[SIMD Distance Kernels and an Allocation-Free HNSW Search Path (v0.15)](.../theseon-simd-and-allocfree/)** — profile-driven HNSW optimization: cross-arch SIMD (AVX2+FMA via avo, hand-written ARM64 NEON Plan 9 assembly), allocation-free graph traversal, the Plan 9 assembler limitations, and the microbench-vs-SIFT-1M discrepancy.
+
+Earlier post: [Merkle Anti-Entropy (v0.14)](.../theseon-anti-entropy/) — the third repair layer.
+
+Profile-driven HNSW optimization: the v0.14 baseline showed three top costs (distance compute 32%, GC overhead 27%, map ops 17%). v0.15 closes the first two and identifies the third as the next bottleneck. Covers the Plan 9 ARM64 assembler limitations (three core float-vector instructions emitted via raw `WORD` directives because the assembler doesn't implement them), the `container/heap` `any`-boxing realization that no amount of pooling could fix, the avo workflow for AVX2, and the microbench that overstated end-to-end gain by ~2× before the SIFT-1M run brought it back to honesty.
 
 <p align="center">
-  <img src="./docs/benchmarks/chart_kv_chaos.png" alt="Chaos run: node-2 killed and restarted mid-load" width="900">
+  <img src="./docs/benchmarks/chart_kv_chaos.png" alt="Chaos: node-2 killed and restarted mid-load. Quorum masks the outage to clients (0% errors throughout)." width="900">
 </p>
 
 <p align="center">
-  <img src="./docs/benchmarks/chart_kv_single_node.png" alt="Single-node throughput + p99: Theseon vs Pebble" width="445">
-  <img src="./docs/benchmarks/chart_vector_recall_qps.png" alt="SIFT-1M recall vs QPS" width="445">
+  <img src="./docs/benchmarks/chart_vector_recall_qps.png" alt="SIFT-1M HNSW: recall@10 vs QPS sweep over ef_search" width="445">
+  <img src="./docs/benchmarks/chart_vector_latency.png" alt="SIFT-1M HNSW: latency percentiles (p50/p95/p99) vs ef_search" width="445">
 </p>
 
-See the [full post](https://ulixert.github.io/posts/theseon-benchmarks/) for methodology, the (3,1,3) null-result debugging story, and what I'd do next. Harnesses live in [`benchmarks/`](benchmarks/README.md) and are reproducible end-to-end.
+Benchmark harnesses live in [`benchmarks/`](benchmarks/README.md) and are reproducible end-to-end (`benchmarks/run-sweep.sh`). Earlier posts: [Benchmarking Theseon (v0.13)](https://ulixert.github.io/posts/theseon-benchmarks/), [Merkle Anti-Entropy (v0.14)](https://ulixert.github.io/posts/theseon-anti-entropy/).
 
 ---
 
@@ -56,6 +65,8 @@ See the [full post](https://ulixert.github.io/posts/theseon-benchmarks/) for met
 11. [Fan-Out, Merge, Repair: Distributed Vector Search](https://ulixert.github.io/posts/theseon-distributed-vector-search/)
 12. [Starting, Joining, Activating: The Node Orchestrator](https://ulixert.github.io/posts/theseon-node-orchestrator/)
 13. [Benchmarking Theseon: KV, Cluster, Chaos, and HNSW on SIFT-1M](https://ulixert.github.io/posts/theseon-benchmarks/)
+14. [Merkle Anti-Entropy: Catching Drift That Read Repair and Hinted Handoff Miss](https://ulixert.github.io/posts/theseon-anti-entropy/)
+15. [SIMD Distance Kernels and an Allocation-Free HNSW Search Path](https://ulixert.github.io/posts/theseon-simd-and-allocfree/)
 
 
 ## Getting Started
@@ -486,6 +497,61 @@ Anti-entropy — periodic merkle tree comparison detects and repairs any remaini
 **Explicit non-guarantees.** No distributed snapshots, no distributed transactions, no cross-key causal consistency.
 These are deliberate scope boundaries, not oversights.
 
+### Cross-Architecture SIMD Distance Kernels
+
+The HNSW search hot path bottlenecks on `L2SquaredFloat32(a, b []float32) float32` — called once per node visited
+during graph traversal. Theseon's `internal/simd` package provides three implementations of that kernel, with runtime
+dispatch picking the best one for the running CPU at process start:
+
+```
+internal/simd/
+  l2_generic.go        always compiled — pure Go reference, also the test oracle
+  l2_arm64.{go,s}      hand-written Plan 9 NEON assembly (8 floats / iter)
+  l2_amd64.{go,s}      avo-generated AVX2+FMA assembly (16 floats / iter)
+  cpu_amd64.go         hasAVX2() = HasAVX2 && HasFMA  — guards weird VMs
+  cpu_arm64.go         hasNEON() = ARM64.HasASIMD
+  dispatch_*.go        init() reassigns L2SquaredFloat32 to the chosen impl
+```
+
+A few non-obvious decisions:
+
+- **`HasAVX2 && HasFMA`** — AVX2 doesn't imply FMA3 in CPUID, even though all consumer x86 CPUs since Haswell (2013)
+  have both. Without the conjunction, hypervisor passthrough setups can `SIGILL` on `VFMADD231PS`.
+- **`VMOVUPS` only, never `VMOVAPS`** — Go's runtime gives at most 16-byte alignment for slice backing arrays. Aligned
+  loads on misaligned data raise `SIGSEGV`. On Skylake+ unaligned has near-zero penalty when data is incidentally
+  aligned.
+- **No `VHADDPS` in the AVX2 reduction** — horizontal float-add is microcoded (3+ µops) on most Intel µarchs. The
+  reduction uses `VEXTRACTF128 + VPERMILPS + VADDPS` shuffle tree instead.
+- **Plan 9 ARM64 doesn't implement `VFADD`/`VFSUB`/`VFADDP` for `.S4`/`.2S`** (TODO in
+  `cmd/asm/internal/asm/testdata/arm64enc.s`). `VFMLA` is supported, used directly. The three unsupported
+  instructions are emitted via `WORD $0xENCODING` directives, each annotated with the AArch64 mnemonic and the
+  bit-field derivation.
+
+The kernel is tested via property tests (boundary lengths from 0 to 1536, scale-aware tolerance harness, zero/identity
+invariants), allocation guards (`testing.AllocsPerRun = 0`), and a `FuzzL2Squared` that compares against a
+float64-accumulating reference oracle. CI runs all of this in a 2×2 matrix: `{ubuntu-latest, ubuntu-24.04-arm}` ×
+`{default, purego}` — covers AVX2, NEON, and the generic-fallback path on both arches.
+
+### Allocation-Free HNSW Search Path
+
+Profile-driven: pre-fix, `BenchmarkSearch_1K_128dim` reported 442 allocs/op and ~27% of total time in GC overhead.
+Two changes brought allocs/op to 2:
+
+- **Pooled visited-set map.** `searchLayer` sources its `map[uint64]bool` from a `sync.Pool[*map]` and `clear()`s on
+  Get; the map's bucket capacity stabilizes at the steady-state working set size. Concurrent searches each get their
+  own map (verified via a 16-goroutine race test).
+- **Typed `*distHeap` replacing `container/heap`.** `container/heap`'s API uses `any` for Push/Pop, which boxes the
+  `heapItem` into an interface header on every push and pop — a structural cost that pooling can't reach. The typed
+  heap exposes direct `push`/`pop`/`up`/`down` methods on `*distHeap`; `Less` and `Swap` become inlinable, and there
+  is no boxing. A parity test drives both implementations with identical random Push/Pop sequences and asserts
+  identical pop order.
+
+Combined with the SIMD kernels, this dropped distance compute from 32% → ~13% of total search time and cut
+end-to-end search latency by ~62% on the 1K microbench. SIFT-1M's improvement is bounded by Amdahl on memory
+bandwidth (the 512MB working set doesn't fit in cache), giving a ~34% real-world speedup. The post-fix profile
+identifies map operations on the visited set and node lookup as the next bottleneck — the natural follow-up is an
+internal dense-ID refactor (slice-indexed graph with `uint32` slot IDs), tracked separately.
+
 ## Benchmarks
 
 Measured on an Apple M1 Air, 16 GB RAM, Go 1.26. Four harnesses live in [`benchmarks/`](benchmarks/README.md)
@@ -514,16 +580,33 @@ fsync-bound on both engines; YCSB-C measures read-path efficiency.
 the full 60-second outage** — quorum coordination masks the failure to clients entirely. Throughput settles
 back to baseline within seconds of the replacement rejoining.
 
-**Vector (SIFT-1M, HNSW M=16, EfConstruct=200, 5000 queries per point)**:
+**Vector (SIFT-1M, HNSW M=16, EfConstruct=200, 1000 queries per ef point, post-SIMD)**:
 
-| ef_search | recall@10 | QPS | p99 |
-|---|---|---|---|
-| 100 | **95.4%** | **831** | 1.76 ms ← balanced |
-| 200 | 97.7% | 479 | 3.06 ms ← high-recall |
-| 1000 | 99.4% | 133 | 11.7 ms |
+| ef_search | recall@10 | QPS | p50 ms | p99 ms |
+|---|---|---|---|---|
+| 50  | 90.8% | 1,918 | 0.54 | 0.82 |
+| **100** | **95.1%** | **1,116** | 0.94 | 1.31 ← balanced |
+| 200 | 97.4% | 629 | 1.65 | 2.31 ← high-recall |
+| 500 | 98.8% | 299 | 3.48 | 5.06 |
+| 1000 | 99.2% | 170 | 6.06 | 9.03 |
 
-📊 **[Full benchmark analysis (blog post)](https://ulixert.github.io/posts/theseon-benchmarks/)** — methodology,
-the (3,1,3) null-result debugging story, comparison to hnswlib, and what's next.
+The 95% recall@10 point is **+34% QPS over the pre-SIMD baseline** (~830 → ~1116). Headline kernel speedup
+(SIMD vs scalar Go) measured in the CI matrix:
+
+| | d=128 | d=384 | d=768 | d=1536 |
+|---|---|---|---|---|
+| **Apple M1 NEON** | 3.86× | 6.37× | 7.15× | 7.58× |
+| **AWS Graviton NEON** | 4.05× | 5.29× | 5.74× | 5.94× |
+| **Intel Xeon AVX2+FMA** | ~10× | ~12.6× | ~13.3× | ~13.8× |
+
+End-to-end gains shrink relative to kernel gains because SIFT-1M's 512MB working set is memory-bandwidth-bound — the
+microbench tells the kernel-quality story, the SIFT-1M sweep tells the workload-quality story. Both are honest; the
+gap between them is its own [blog post](https://ulixert.github.io/posts/theseon-simd-and-allocfree/).
+
+📊 **[Latest benchmark post (v0.15)](https://ulixert.github.io/posts/theseon-simd-and-allocfree/)** — SIMD kernels
++ allocation-free graph traversal + the microbench-trap lesson.
+  📊 **[Earlier benchmark post (v0.13)](https://ulixert.github.io/posts/theseon-benchmarks/)** — methodology,
+  the (3,1,3) null-result debugging story, comparison to hnswlib.
 
 🔬 **[Per-operation microbenchmarks](BENCHMARKS.md)** — `go test -bench` numbers for individual operations (memtable, SSTable, MVCC).
 
@@ -577,7 +660,7 @@ hint drain progress, and replicate-RPC duration.
 - [x] Admin CLI for explicit topology management (status, join, activate, remove)
 - [x] Integration tests (cluster formation, hinted handoff) and chaos benchmark (kill + restart under load)
 - [x] Prometheus `/metrics` endpoint (KV throughput/latency, compactions, SSTable count, hint drain, RPC duration)
-- [ ] Merkle-tree anti-entropy with tombstone GC
+- [x] Merkle-tree anti-entropy (XOR-leaf tree, grace-period filter, periodic + on-recovery + admin triggers)
 - [ ] Data streaming backfill to JOINING replicas (historical data migration)
 - [ ] Jepsen-style fault injection / chaos tests
 
@@ -592,6 +675,17 @@ hint drain progress, and replicate-RPC duration.
 - [x] HNSW snapshot persistence (avoid full rebuild on restart)
 - [ ] Metadata filtering (in-memory post-filter + secondary index)
 - [x] Distributed vector search (fan-out across replicas via gRPC, oversample + rerank)
+
+### Performance Engineering
+
+- [x] Cross-architecture SIMD distance kernels: AVX2+FMA on x86 (avo-generated), hand-written ARM64 NEON in Plan 9 assembly
+- [x] Runtime CPU dispatch with `HasAVX2 && HasFMA` / `HasASIMD` gating, generic Go fallback, `-tags=purego` build path
+- [x] Allocation-free HNSW search: pooled visited-set, typed candidate heap replacing `container/heap` (no `any`-boxing)
+- [x] Tolerance-aware property tests + `FuzzL2Squared` against a float64 reference oracle
+- [x] CI matrix runtime validation: `{ubuntu-latest, ubuntu-24.04-arm} × {default, purego}` covers every dispatch branch
+- [x] `pprof`-driven optimization workflow with profile artifacts captured at each stage
+- [ ] Internal dense-ID refactor (slice-indexed graph, `uint32` slot IDs) — closes the ~38% map-ops bottleneck
+- [ ] AVX-512 path (gated, opt-in) for the small set of deployment CPUs that benefit
 
 ## Project Structure
 
@@ -614,16 +708,29 @@ theseon/
   cluster/         distributed layer: SWIM membership, coordinator (quorum fan-out + read
                    repair), AdminService handlers (join/activate/remove with CAS),
                    gRPC transport, peer pool, voter/learner write split
+    antientropy/   Merkle-tree anti-entropy: tree, ranges, RPC, manager, reconcile loop
     hintedhandoff/ separate hint DB, type-tagged envelopes, drainer (KV + vector replay)
-  hashring/        consistent hash ring: vnodes, SHA-256 placement, atomic ReplaceMembers
+  hashring/        consistent hash ring: vnodes, xxhash placement, atomic ReplaceMembers
   hlc/             hybrid logical clocks: wall-clock + logical counter, drift detection
   server/          gRPC server: Theseon/Internal/Admin services, standalone/cluster routing
   proto/theseonpb/ .proto definitions and generated code
 
   vector/          VectorStore: collection management, encoding, KV integration, metrics,
                    per-collection HNSW locks, VectorVersion (LWW)
-    hnsw/          HNSW graph (from scratch): insert, beam search, tombstone cleanup
+    hnsw/          HNSW graph (from scratch): insert, beam search, tombstone cleanup,
+                   pooled visited-set, typed candidate heap (no container/heap)
     eval/          recall@k, brute-force KNN, benchmarks, parameter sweep
+
+  internal/simd/   SIMD distance kernel layer (internal-only):
+                   l2_generic.go (Go reference), l2_arm64.{go,s} (NEON Plan 9 asm),
+                   l2_amd64.{go,s} (avo-generated AVX2+FMA), dispatch_*.go,
+                   cpu_{amd64,arm64,other}.go (runtime feature detection).
+                   asm/amd64/main.go is the avo source; regenerate via `make gen-simd`.
+
+  benchmarks/      separate Go module (own go.mod with replace ../) so the comparison
+                   target (CockroachDB's Pebble) and the chart-generation deps don't
+                   pollute the main module's go.mod. Harnesses: kv_single_node,
+                   kv_cluster, kv_chaos, vector (SIFT-1M).
 ```
 
 ## Build
